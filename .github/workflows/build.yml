@@ -1,0 +1,25 @@
+name: Build Custom Iosevka
+on:
+  workflow_dispatch: # 手動実行用ボタンを出す設定
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ttfautohint
+          npm install
+      - name: Build Font
+        run: npx tsc && node dist/api/cli.js build iosevka-custom --ttc
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: iosevka-custom-fonts
+          path: dist/
