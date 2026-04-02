@@ -1,7 +1,7 @@
 ### See https://github.com/be5invis/Iosevka/blob/master/doc/custom-build.md for comprehensive
 ### documentation of the options in this file
 
-[buildPlans.IosevkaCustom]      # <IosevkaCustom> is your plan name
+[buildPlans.Iosevka-Custom]      # <IosevkaCustom> is your plan name
 family = "Iosevka Custom"        # Font menu family name
 spacing = "normal"               # Optional; Values: `normal`, `term`, `fontconfig-mono`, or `fixed`
 serifs = "sans"                  # Optional; Values: `sans` or `slab`
