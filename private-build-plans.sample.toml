@@ -1,10 +1,7 @@
-### See https://github.com/be5invis/Iosevka/blob/master/doc/custom-build.md for comprehensive
-### documentation of the options in this file
-
-[buildPlans.Iosevka-Custom]      # <IosevkaCustom> is your plan name
-family = "Iosevka Custom"        # Font menu family name
-spacing = "normal"               # Optional; Values: `normal`, `term`, `fontconfig-mono`, or `fixed`
-serifs = "sans"                  # Optional; Values: `sans` or `slab`
+[buildPlans.Iosevka-Custom]
+family = "Iosevka Custom"
+spacing = "term"
+serifs = "sans"
 exportGlyphNames = false       # Set this to true for ligature support in Kitty (increased file size)
 
 webfontFormats = ['ttf', 'woff2']
