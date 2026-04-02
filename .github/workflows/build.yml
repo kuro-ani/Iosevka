@@ -17,7 +17,7 @@ jobs:
           npm install
       - name: Build
         # "iosevka-custom" は private-build-plans.toml 内の名前と一致させる必要があります
-        run: npx iosevka-build iosevka-custom --contents dist/
+        run: npx iosevka-build Iosevka-Custom --contents dist/
       - name: Upload
         uses: actions/upload-artifact@v4
         with:
