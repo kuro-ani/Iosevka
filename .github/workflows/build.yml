@@ -1,3 +1,24 @@
+name: Build Custom Iosevka
+on: workflow_dispatch
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ttfautohint
+          npm install
       - name: Build
-        # プラン名が `iosevka-custom` の場合
+        # 下記の "iosevka-custom" は TOML 内の [buildPlans.xxxxx] と一致させる
         run: npm run build -- Iosevka-Custom --contents dist/
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: iosevka-custom-font
+          path: dist/
