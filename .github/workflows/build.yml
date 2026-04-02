@@ -21,8 +21,8 @@ jobs:
           npm install
 
       - name: Build Font
-        # プラン名とファイル名を明示的に指定して実行します
-        run: npm run build -- Iosevka-Custom --plan-file private-build-plans.toml --contents dist/
+        # プラン名に基いた出力パスを指定します
+        run: npm run build -- contents/Iosevka-Custom/ttf --plan-file private-build-plans.toml
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
