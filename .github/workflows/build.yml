@@ -5,19 +5,26 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
         with:
           node-version: 20
-      - name: Install
+          cache: 'npm'
+
+      - name: Install Dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y ttfautohint
           npm install
-         - name: Build
-        # --plan-file オプションを追加して、TOMLファイルを直接指定します
+
+      - name: Build Font
+        # プラン名とファイル名を明示的に指定して実行します
         run: npm run build -- Iosevka-Custom --plan-file private-build-plans.toml --contents dist/
-        - name: Upload
+
+      - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
           name: iosevka-custom-font
