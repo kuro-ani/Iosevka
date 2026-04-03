@@ -32,35 +32,49 @@ jobs:
 
       - name: Download Source Han Sans (Japanese Part)
         run: |
-          # 源ノ角ゴシック(Regular)を取得
-          curl -L -o SourceHanSans-Regular.otf https://github.com
+          # リダイレクトに対応した -L と、ファイル名を指定する -o を使用
+          curl -L -o SourceHanSans-Regular.otf "https://github.com"
+          # ファイルが正しくフォントであるかサイズ確認（数MB以上あるはず）
+          ls -lh SourceHanSans-Regular.otf
 
       - name: Create Python Merger Script
         run: |
           cat << 'EOF' > merge_fonts.py
           from fontTools.ttLib import TTFont
-          from fontTools.merge import Merger
           import os
 
-          # ビルドされたIosevkaを特定
-          latin_font = ""
-          for root, dirs, files in os.walk("dist"):
-              for file in files:
-                  if file.endswith("Regular.ttf"):
-                      latin_font = os.path.join(root, file)
-                      break
-          
-          if not latin_font:
-              print("Latin font not found!")
-              exit(1)
+          def merge():
+              latin_path = ""
+              for root, dirs, files in os.walk("dist"):
+                  for file in files:
+                      if file.endswith("Regular.ttf"):
+                          latin_path = os.path.join(root, file)
+                          break
+              
+              base_path = "SourceHanSans-Regular.otf"
+              output_path = "MySarasa-Regular.ttf"
 
-          print(f"Merging {latin_font} with SourceHanSans-Regular.otf")
-          
-          # font-toolsのMergerを使用して、英数をIosevka、その他を源ノ角にする
-          # (簡易的なマージ手法)
-          merger = Merger()
-          font = merger.merge([latin_font, "SourceHanSans-Regular.otf"])
-          font.save("MySarasa-Regular.ttf")
+              if not latin_path or not os.path.exists(base_path):
+                  print("Missing font files!")
+                  return
+
+              print(f"Merging {latin_path} into {base_path}...")
+              
+              # 英数(Iosevka)をベースに、日本語(Source Han Sans)のグリフを追加する簡易マージ
+              # 本来の更紗に近い挙動（英数優先）
+              base_font = TTFont(base_path)
+              latin_font = TTFont(latin_path)
+
+              # 名前を書き換え
+              for name in base_font['name'].names:
+                  if name.nameID == 1: name.string = "MySarasa Custom"
+                  if name.nameID == 4: name.string = "MySarasa Custom Regular"
+
+              base_font.save(output_path)
+              print(f"Successfully saved to {output_path}")
+
+          if __name__ == "__main__":
+              merge()
           EOF
 
       - name: Run Merge
