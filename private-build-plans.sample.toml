@@ -2,9 +2,16 @@
 family = "Iosevka Custom"
 spacing = "term"
 serifs = "sans"
-exportGlyphNames = false       # Set this to true for ligature support in Kitty (increased file size)
 
-webfontFormats = ['ttf', 'woff2']
+  [buildPlans.Iosevka-Custom.names]
+  family = "Iosevka Custom"
+  subfamily = "Regular"
+  full = "Iosevka Custom Regular"
+  postscript = "Iosevka-Custom-Regular"
+
+
+
+
 
 ###################################################################################################
 # Configure variants
