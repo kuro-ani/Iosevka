@@ -1,4 +1,4 @@
-name: Build Custom Sarasa
+name: Build Custom Iosevka
 on: workflow_dispatch
 
 jobs:
@@ -12,86 +12,24 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
+          cache: 'npm'
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.x'
-
-      - name: Install Build Tools
+      - name: Install Dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y ttfautohint
           npm install
-          pip install fonttools
 
-      - name: Build Iosevka (Latin Part)
+      - name: Build Font
+        # 環境変数でプランファイルを指定し、TTF形式でビルドを実行
         env:
           IOSEVKA_CUSTOM_PLAN_PATH: private-build-plans.toml
         run: npm run build -- ttf::iosevkacustom
 
-      - name: Download Source Han Sans (Japanese Part)
-        run: |
-          # 確実にバイナリを取得するため、ユーザーエージェントを指定し、リダイレクトを完全に追跡します
-          curl -u "u:p" -L -H "Accept: application/vnd.github.v3.raw" -o SourceHanSans-Regular.otf "https://github.com"
-          
-          # ファイルが壊れていないか（HTMLでないか）サイズを確認（源ノ角Regularは約16MB以上）
-          FILE_SIZE=$(stat -c%s "SourceHanSans-Regular.otf")
-          echo "Downloaded file size: $FILE_SIZE bytes"
-          if [ $FILE_SIZE -lt 1000000 ]; then
-            echo "Error: Downloaded file is too small. It might be an HTML error page."
-            exit 1
-          fi
-
-      - name: Create Python Merger Script
-        run: |
-          cat << 'EOF' > merge_fonts.py
-          import os
-          from fontTools.ttLib import TTFont
-
-          def merge():
-              # Iosevkaのパスを探す
-              latin_path = ""
-              for root, dirs, files in os.walk("dist"):
-                  for file in files:
-                      if file.endswith("Regular.ttf"):
-                          latin_path = os.path.join(root, file)
-                          break
-              
-              if not latin_path:
-                  print("Error: Iosevka build file not found.")
-                  return
-
-              base_path = "SourceHanSans-Regular.otf"
-              output_path = "MySarasa-Regular.ttf"
-
-              print(f"Loading Latin: {latin_path}")
-              print(f"Loading Base: {base_path}")
-
-              # 合成処理
-              # 更紗ゴシックの挙動を模倣：英数(Iosevka)をベースに、日本語(Source Han Sans)を合成
-              # ここでは簡易的に名前の書き換えとファイルの保存を行います
-              try:
-                  base_font = TTFont(base_path)
-                  # 名前の設定
-                  for name in base_font['name'].names:
-                      if name.nameID == 1: name.string = "MySarasa Custom".encode('utf-16-be')
-                      if name.nameID == 4: name.string = "MySarasa Custom Regular".encode('utf-16-be')
-                  
-                  base_font.save(output_path)
-                  print(f"Successfully created {output_path}")
-              except Exception as e:
-                  print(f"Error during merge: {e}")
-
-          if __name__ == "__main__":
-              merge()
-          EOF
-
-      - name: Run Merge
-        run: python merge_fonts.py
-
-      - name: Upload Finished Font
+      - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: my-custom-sarasa
-          path: MySarasa-Regular.ttf
+          name: iosevka-custom-font
+          # ビルドされたすべての .ttf ファイルを回収
+          path: "**/*.ttf"
+          if-no-files-found: error
