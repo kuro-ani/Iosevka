@@ -13,12 +13,17 @@ jobs:
         with:
           node-version: 20
 
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
       - name: Install Build Tools
         run: |
           sudo apt-get update
           sudo apt-get install -y ttfautohint
           npm install
-          npm install -g yoseka
+          pip install fonttools
 
       - name: Build Iosevka (Latin Part)
         env:
@@ -27,15 +32,39 @@ jobs:
 
       - name: Download Source Han Sans (Japanese Part)
         run: |
-          # AdobeのGitHubから源ノ角ゴシック(Regular)を取得
-          curl -L -O https://github.com
+          # 源ノ角ゴシック(Regular)を取得
+          curl -L -o SourceHanSans-Regular.otf https://github.com
 
-      - name: Combine Fonts (Yoseka)
+      - name: Create Python Merger Script
         run: |
-          # ビルドされたIosevkaを探して合成を実行
-          # --latin-scale 1.05 は更紗らしいバランスにするための微調整です
-          LATIN_FONT=$(find dist -name "iosevkacustom-Regular.ttf" | head -n 1)
-          yoseka --base SourceHanSans-Regular.otf --latin "$LATIN_FONT" --latin-scale 1.05 --out MySarasa-Regular.ttf
+          cat << 'EOF' > merge_fonts.py
+          from fontTools.ttLib import TTFont
+          from fontTools.merge import Merger
+          import os
+
+          # ビルドされたIosevkaを特定
+          latin_font = ""
+          for root, dirs, files in os.walk("dist"):
+              for file in files:
+                  if file.endswith("Regular.ttf"):
+                      latin_font = os.path.join(root, file)
+                      break
+          
+          if not latin_font:
+              print("Latin font not found!")
+              exit(1)
+
+          print(f"Merging {latin_font} with SourceHanSans-Regular.otf")
+          
+          # font-toolsのMergerを使用して、英数をIosevka、その他を源ノ角にする
+          # (簡易的なマージ手法)
+          merger = Merger()
+          font = merger.merge([latin_font, "SourceHanSans-Regular.otf"])
+          font.save("MySarasa-Regular.ttf")
+          EOF
+
+      - name: Run Merge
+        run: python merge_fonts.py
 
       - name: Upload Finished Font
         uses: actions/upload-artifact@v4
