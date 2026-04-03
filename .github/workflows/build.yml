@@ -21,11 +21,12 @@ jobs:
           npm install
 
       - name: Build Font
-         # 環境変数 IOSEVKA_CUSTOM_PLAN_PATH でファイルを直接指定します
+        # 環境変数 IOSEVKA_CUSTOM_PLAN_PATH でファイルを教え、
+        # 引数には「プラン名」ではなく「出力ディレクトリ」を指定します
         env:
           IOSEVKA_CUSTOM_PLAN_PATH: private-build-plans.toml
-        run: npm run build -- iosevkacustom
-        
+        run: npm run build -- ttf::iosevkacustom
+
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
