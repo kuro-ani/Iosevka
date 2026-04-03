@@ -1,50 +1,34 @@
-[buildPlans.iosevkacustom]
-family = "Iosevka Custom"
-spacing = "term"
-serifs = "sans"
-no-cv-ss = false
-no-ligation = false
+name: Build Custom Iosevka
+on: workflow_dispatch
 
-  [buildPlans.iosevkacustom.names]
-  family = "Iosevka Custom"
-  subfamily = "Regular"
-  full = "Iosevka Custom Regular"
-  postscript = "Iosevka-Custom-Regular"
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
 
-  [buildPlans.iosevkacustom.variants.design]
-  cv10 = 22
-  cv19 = 3
-  cv20 = 4
-  cv22 = 3
-  cv26 = 2
-  cv32 = 45
-  cv33 = 4
-  cv36 = 2
-  cv41 = 20
-  cv42 = 12
-  cv44 = 2
-  cv45 = 7
-  cv46 = 21
-  cv47 = 12
-  cv51 = 8
-  cv52 = 17
-  cv56 = 4
-  cv57 = 25
-  cv58 = 12
-  cv59 = 18
-  cv60 = 19
-  # 名前の代わりに、Customizerで出てきたID（数値）を直接指定します
-  capital-i = 3
-  capital-l = 5
-  t = 1
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
 
-[buildPlans.iosevkacustom.weights.Regular]
-shape = 400
-menu  = 400
-css   = 400
+      - name: Install Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ttfautohint
+          npm install
 
-[buildPlans.iosevkacustom.slopes.Upright]
-angle = 0
-shape = "upright"
-menu  = "upright"
-css   = "normal"
+      - name: Build Font
+        # 環境変数 IOSEVKA_CUSTOM_PLAN_PATH でファイルを教え、
+        # 引数には「プラン名」ではなく「出力ディレクトリ」を指定します
+        env:
+          IOSEVKA_CUSTOM_PLAN_PATH: private-build-plans.toml
+        run: npm run build -- ttf::iosevkacustom
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: iosevka-custom-font
+          path: "**/*.ttf"
