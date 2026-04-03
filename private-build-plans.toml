@@ -33,10 +33,10 @@ no-ligation = false
   cv58 = 12
   cv59 = 18
   cv60 = 19
-  # 名前の代わりに、Customizerで出てきたID（数値）を直接指定します
-  capital-i = 3
-  capital-l = 5
-  t = 1
+  # 数値ではなく、現在のIosevkaが理解できる名前に修正
+  capital-i = "serifed"
+  capital-l = "serifed"
+  t = "standard"
 
 [buildPlans.iosevkacustom.weights.Regular]
 shape = 400
