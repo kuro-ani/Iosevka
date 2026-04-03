@@ -1,4 +1,4 @@
-name: Build Custom Iosevka
+name: Build Custom Sarasa
 on: workflow_dispatch
 
 jobs:
@@ -12,23 +12,33 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: 'npm'
 
-      - name: Install Dependencies
+      - name: Install Build Tools
         run: |
           sudo apt-get update
           sudo apt-get install -y ttfautohint
           npm install
+          npm install -g yoseka
 
-      - name: Build Font
-        # 環境変数 IOSEVKA_CUSTOM_PLAN_PATH でファイルを教え、
-        # 引数には「プラン名」ではなく「出力ディレクトリ」を指定します
+      - name: Build Iosevka (Latin Part)
         env:
           IOSEVKA_CUSTOM_PLAN_PATH: private-build-plans.toml
         run: npm run build -- ttf::iosevkacustom
 
-      - name: Upload Artifact
+      - name: Download Source Han Sans (Japanese Part)
+        run: |
+          # AdobeのGitHubから源ノ角ゴシック(Regular)を取得
+          curl -L -O https://github.com
+
+      - name: Combine Fonts (Yoseka)
+        run: |
+          # ビルドされたIosevkaを探して合成を実行
+          # --latin-scale 1.05 は更紗らしいバランスにするための微調整です
+          LATIN_FONT=$(find dist -name "iosevkacustom-Regular.ttf" | head -n 1)
+          yoseka --base SourceHanSans-Regular.otf --latin "$LATIN_FONT" --latin-scale 1.05 --out MySarasa-Regular.ttf
+
+      - name: Upload Finished Font
         uses: actions/upload-artifact@v4
         with:
-          name: iosevka-custom-font
-          path: "**/*.ttf"
+          name: my-custom-sarasa
+          path: MySarasa-Regular.ttf
