@@ -1,6 +1,6 @@
 [buildPlans.iosevkacustom]
 family = "Iosevka Custom"
-spacing = "term"
+spacing = "fixed"
 serifs = "sans"
 no-cv-ss = false
 no-ligation = false
@@ -33,10 +33,19 @@ no-ligation = false
   cv58 = 14
   cv59 = 18
   cv60 = 19
+  # 【レギュラー指定時】にイタリックの形状（しっぽ付き）を割り当てる
+  [buildPlans.iosevkacustom.variants.upright]
+  i = "tailed-serifed"
+  l = "tailed-serifed"
   capital-i = "serifed"
   capital-l = "serifed"
-  # エラーの原因となっていた t = "standard" を削除しました。
-  # 指定しないことでデフォルトの形状が適用されます。
+
+  # 【イタリック指定時】にレギュラーの形状（直線的）を割り当てる
+  [buildPlans.iosevkacustom.variants.italic]
+  i = "serifed"
+  l = "serifed"
+  capital-i = "serifed"
+  capital-l = "serifed"
 
 [buildPlans.iosevkacustom.weights.Regular]
 shape = 400
