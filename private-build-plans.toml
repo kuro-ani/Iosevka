@@ -33,9 +33,10 @@ no-ligation = false
   cv58 = 12
   cv59 = 18
   cv60 = 19
-  capital-i = "v-serifed"
-  capital-l = "v-serifed"
-  t = "v-standard"
+  # 名前の代わりに、Customizerで出てきたID（数値）を直接指定します
+  capital-i = 3
+  capital-l = 5
+  t = 1
 
 [buildPlans.iosevkacustom.weights.Regular]
 shape = 400
