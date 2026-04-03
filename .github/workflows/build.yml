@@ -21,12 +21,14 @@ jobs:
           npm install
 
       - name: Build Font
-        # 出力先を contents/ に指定します
-        run: npm run build -- --plan-file private-build-plans.toml Iosevka-Custom --contents contents/
+        # 出力先をあえて指定せず、標準の挙動に任せます
+        run: npm run build -- --plan-file private-build-plans.toml Iosevka-Custom
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
           name: iosevka-custom-font
-          # contents フォルダ以下のすべての .ttf ファイルを探して保存します
-          path: contents/**/*.ttf
+          # 階層を問わず、生成されたすべての .ttf ファイルを再帰的に探して全回収します
+          path: "**/*.ttf"
+          # もしファイルが見つからなかった場合にエラーとして報告させます
+          if-no-files-found: error
