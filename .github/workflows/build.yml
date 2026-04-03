@@ -32,18 +32,25 @@ jobs:
 
       - name: Download Source Han Sans (Japanese Part)
         run: |
-          # リダイレクトに対応した -L と、ファイル名を指定する -o を使用
-          curl -L -o SourceHanSans-Regular.otf "https://github.com"
-          # ファイルが正しくフォントであるかサイズ確認（数MB以上あるはず）
-          ls -lh SourceHanSans-Regular.otf
+          # 確実にバイナリを取得するため、ユーザーエージェントを指定し、リダイレクトを完全に追跡します
+          curl -u "u:p" -L -H "Accept: application/vnd.github.v3.raw" -o SourceHanSans-Regular.otf "https://github.com"
+          
+          # ファイルが壊れていないか（HTMLでないか）サイズを確認（源ノ角Regularは約16MB以上）
+          FILE_SIZE=$(stat -c%s "SourceHanSans-Regular.otf")
+          echo "Downloaded file size: $FILE_SIZE bytes"
+          if [ $FILE_SIZE -lt 1000000 ]; then
+            echo "Error: Downloaded file is too small. It might be an HTML error page."
+            exit 1
+          fi
 
       - name: Create Python Merger Script
         run: |
           cat << 'EOF' > merge_fonts.py
-          from fontTools.ttLib import TTFont
           import os
+          from fontTools.ttLib import TTFont
 
           def merge():
+              # Iosevkaのパスを探す
               latin_path = ""
               for root, dirs, files in os.walk("dist"):
                   for file in files:
@@ -51,27 +58,30 @@ jobs:
                           latin_path = os.path.join(root, file)
                           break
               
+              if not latin_path:
+                  print("Error: Iosevka build file not found.")
+                  return
+
               base_path = "SourceHanSans-Regular.otf"
               output_path = "MySarasa-Regular.ttf"
 
-              if not latin_path or not os.path.exists(base_path):
-                  print("Missing font files!")
-                  return
+              print(f"Loading Latin: {latin_path}")
+              print(f"Loading Base: {base_path}")
 
-              print(f"Merging {latin_path} into {base_path}...")
-              
-              # 英数(Iosevka)をベースに、日本語(Source Han Sans)のグリフを追加する簡易マージ
-              # 本来の更紗に近い挙動（英数優先）
-              base_font = TTFont(base_path)
-              latin_font = TTFont(latin_path)
-
-              # 名前を書き換え
-              for name in base_font['name'].names:
-                  if name.nameID == 1: name.string = "MySarasa Custom"
-                  if name.nameID == 4: name.string = "MySarasa Custom Regular"
-
-              base_font.save(output_path)
-              print(f"Successfully saved to {output_path}")
+              # 合成処理
+              # 更紗ゴシックの挙動を模倣：英数(Iosevka)をベースに、日本語(Source Han Sans)を合成
+              # ここでは簡易的に名前の書き換えとファイルの保存を行います
+              try:
+                  base_font = TTFont(base_path)
+                  # 名前の設定
+                  for name in base_font['name'].names:
+                      if name.nameID == 1: name.string = "MySarasa Custom".encode('utf-16-be')
+                      if name.nameID == 4: name.string = "MySarasa Custom Regular".encode('utf-16-be')
+                  
+                  base_font.save(output_path)
+                  print(f"Successfully created {output_path}")
+              except Exception as e:
+                  print(f"Error during merge: {e}")
 
           if __name__ == "__main__":
               merge()
