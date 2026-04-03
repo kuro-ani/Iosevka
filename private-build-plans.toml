@@ -1,8 +1,10 @@
 [buildPlans.iosevkacustom]
 family = "Iosevka Custom"
-spacing = "fixed"
+# "fixed" から "term" に戻すとリガチャが有効になります
+spacing = "term"
 serifs = "sans"
 no-cv-ss = false
+# リガチャを明示的に有効化
 no-ligation = false
 
   [buildPlans.iosevkacustom.names]
@@ -10,6 +12,9 @@ no-ligation = false
   subfamily = "Regular"
   full = "Iosevka Custom Regular"
   postscript = "Iosevka-Custom-Regular"
+  
+
+
 
   [buildPlans.iosevkacustom.variants.design]
   cv10 = 22
@@ -33,6 +38,8 @@ no-ligation = false
   cv58 = 14
   cv59 = 18
   cv60 = 19
+  lig-neq = "vertical-dotted"
+lig-equal-chain = "without-notch"
   # 【レギュラー指定時】にイタリックの形状（しっぽ付き）を割り当てる
   [buildPlans.iosevkacustom.variants.upright]
   i = "tailed-serifed"
