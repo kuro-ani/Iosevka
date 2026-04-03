@@ -33,10 +33,10 @@ no-ligation = false
   cv58 = 12
   cv59 = 18
   cv60 = 19
-  # 数値ではなく、現在のIosevkaが理解できる名前に修正
   capital-i = "serifed"
   capital-l = "serifed"
-  t = "standard"
+  # エラーの原因となっていた t = "standard" を削除しました。
+  # 指定しないことでデフォルトの形状が適用されます。
 
 [buildPlans.iosevkacustom.weights.Regular]
 shape = 400
