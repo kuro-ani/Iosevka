@@ -6,12 +6,6 @@ serifs = "sans"
 no-cv-ss = false
 # リガチャを明示的に有効化
 no-ligation = false
-
-  [buildPlans.iosevkacustom.names]
-  family = "Iosevka Custom"
-  subfamily = "Regular"
-  full = "Iosevka Custom Regular"
-  postscript = "Iosevka-Custom-Regular"
   
 
 
