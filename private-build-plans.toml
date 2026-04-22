@@ -12,12 +12,16 @@ exportGlyphNames = false
     eight = "crossing-asymmetric"
     zero = "tall-slashed"
     capital-q = "crossing"
+    capital-v = "straight-serifed"
+    capital-w = "straight-almost-flat-top-serifed"
     f = "tailed-crossbar-at-half-ascender-height"
     g = "single-storey-earless-corner"
     i = "semi-tailed"
     l = "serifed-semi-tailed"
-    x = "semi-chancery-straight-serifless"
+    v = "curly-serifless"
+    x = "chancery"
     y = "curly-turn-serifless"
+    lower-nu = "casual-serifed"
     asterisk = "turn-hex-low"
     dollar = "through"
     cent = "through"
@@ -26,7 +30,7 @@ exportGlyphNames = false
     lig-hyphen-chain = "without-notch"
     lig-plus-chain = "without-notch"
 
-    [buildPlans.iosevkacustom.variants.oblique]
+	    [buildPlans.iosevkacustom.variants.oblique]
     lig-neq = "slightly-slanted-dotted"
     lig-equal-chain = "without-notch"
     lig-hyphen-chain = "without-notch"
@@ -43,13 +47,13 @@ menu = 700
 css = 700
 
 [buildPlans.iosevkacustom.slopes.Upright]
-angle = 1.6
+angle = 1.8
 shape = "upright"
 menu = "upright"
 css = "normal"
 
 [buildPlans.iosevkacustom.slopes.Italic]
-angle = 10.4
+angle = 10.6
 shape = "italic"
 menu = "italic"
 css = "italic"
