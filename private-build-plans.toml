@@ -1,14 +1,14 @@
-[buildPlans.iosevkacustom]
+[buildPlans.IosevkaCustom]
 family = "Iosevka Custom"
 spacing = "normal"
 serifs = "sans"
 noCvSs = true
 exportGlyphNames = false
 
-  [buildPlans.iosevkacustom.variants]
+  [buildPlans.IosevkaCustom.variants]
   inherits = "ss12"
 
-    [buildPlans.iosevkacustom.variants.design]
+    [buildPlans.IosevkaCustom.variants.design]
     eight = "crossing-asymmetric"
     zero = "tall-slashed"
     capital-q = "crossing"
@@ -30,29 +30,29 @@ exportGlyphNames = false
     lig-hyphen-chain = "without-notch"
     lig-plus-chain = "without-notch"
 
-	    [buildPlans.iosevkacustom.variants.oblique]
+	    [buildPlans.IosevkaCustom.variants.oblique]
     lig-neq = "slightly-slanted-dotted"
     lig-equal-chain = "without-notch"
     lig-hyphen-chain = "without-notch"
     lig-plus-chain = "without-notch"
 
-[buildPlans.iosevkacustom.weights.Regular]
+[buildPlans.IosevkaCustom.weights.Regular]
 shape = 400
 menu = 400
 css = 400
 
-[buildPlans.iosevkacustom.weights.Bold]
+[buildPlans.IosevkaCustom.weights.Bold]
 shape = 700
 menu = 700
 css = 700
 
-[buildPlans.iosevkacustom.slopes.Upright]
+[buildPlans.IosevkaCustom.slopes.Upright]
 angle = 1.8
 shape = "upright"
 menu = "upright"
 css = "normal"
 
-[buildPlans.iosevkacustom.slopes.Italic]
+[buildPlans.IosevkaCustom.slopes.Italic]
 angle = 10.6
 shape = "italic"
 menu = "italic"
