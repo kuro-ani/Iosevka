@@ -6,75 +6,61 @@ serifs = "sans"
 no-cv-ss = false
 # リガチャを明示的に有効化
 no-ligation = false
+
+  [buildPlans.iosevkacustom.names]
+  family = "Iosevka Custom"
+  subfamily = "Regular"
+  full = "Iosevka Custom Regular"
+  postscript = "Iosevka-Custom-Regular"
   
 
 
 
- [buildPlans.IosevkaCustom.variants]
-  inherits = "ss12"
+  [buildPlans.iosevkacustom.variants.design]
+  cv10 = 22
+  cv19 = 3
+  cv20 = 4
+  cv22 = 3
+  cv26 = 2
+  cv32 = 45
+  cv33 = 4
+  cv36 = 2
+  cv41 = 20
+  cv42 = 12
+  cv44 = 12
+  cv45 = 7
+  cv46 = 21
+  cv47 = 12
+  cv51 = 8
+  cv52 = 17
+  cv56 = 4
+  cv57 = 25
+  cv58 = 14
+  cv59 = 18
+  cv60 = 19
+  lig-neq = "vertical-dotted"
+lig-equal-chain = "without-notch"
+  # 【レギュラー指定時】にイタリックの形状（しっぽ付き）を割り当てる
+  [buildPlans.iosevkacustom.variants.upright]
+  i = "tailed-serifed"
+  l = "tailed-serifed"
+  capital-i = "serifed"
+  capital-l = "serifed"
 
-    [buildPlans.IosevkaCustom.variants.design]
-    zero = "tall-slashed"
-    capital-g = "toothless-corner-serifless-hooked"
-    capital-j = "serifed-both-sides"
-    capital-p = "closed-serifless"
-    capital-q = "crossing-baseline"
-    a = "double-storey-tailed"
-    f = "tailed-crossbar-at-half-ascender-height"
-    g = "double-storey"
-    i = "semi-tailed"
-    l = "tailed"
-    q = "tailed-motion-serifed"
-    dollar = "interrupted"
-    lig-neq = "slightly-slanted-dotted"
-    lig-equal-chain = "without-notch"
-    lig-plus-chain = "with-notch"
+  # 【イタリック指定時】にレギュラーの形状（直線的）を割り当てる
+  [buildPlans.iosevkacustom.variants.italic]
+  i = "serifed"
+  l = "serifed"
+  capital-i = "serifed"
+  capital-l = "serifed"
 
-    [buildPlans.IosevkaCustom.variants.italic]
-    zero = "tall-slashed"
-    capital-g = "toothless-corner-serifless-hooked"
-    capital-j = "serifed-both-sides"
-    capital-p = "closed-serifless"
-    capital-q = "crossing-baseline"
-    a = "double-storey-tailed"
-    f = "tailed-crossbar-at-half-ascender-height"
-    g = "double-storey"
-    i = "semi-tailed"
-    l = "tailed"
-    q = "tailed-motion-serifed"
-    dollar = "interrupted"
-    lig-neq = "slightly-slanted-dotted"
-    lig-equal-chain = "without-notch"
-    lig-plus-chain = "with-notch"
-
-    [buildPlans.IosevkaCustom.variants.oblique]
-    zero = "tall-slashed"
-    capital-g = "toothless-corner-serifless-hooked"
-    capital-j = "serifed-both-sides"
-    capital-p = "closed-serifless"
-    capital-q = "crossing-baseline"
-    a = "double-storey-tailed"
-    f = "tailed-crossbar-at-half-ascender-height"
-    g = "double-storey"
-    i = "semi-tailed"
-    l = "tailed"
-    q = "tailed-motion-serifed"
-    dollar = "interrupted"
-    lig-neq = "slightly-slanted-dotted"
-    lig-equal-chain = "without-notch"
-    lig-plus-chain = "with-notch"
-
-  [buildPlans.IosevkaCustom.ligations]
-  inherits = "clike"
-  
-  
 [buildPlans.iosevkacustom.weights.Regular]
 shape = 400
 menu  = 400
 css   = 400
 
 [buildPlans.iosevkacustom.slopes.Upright]
-angle = 2.5
+angle = 0
 shape = "upright"
 menu  = "upright"
 css   = "normal"
