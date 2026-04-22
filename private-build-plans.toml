@@ -1,66 +1,55 @@
-[buildPlans.iosevkacustom]
+[buildPlans.IosevkaCustom]
 family = "Iosevka Custom"
-# "fixed" から "term" に戻すとリガチャが有効になります
-spacing = "term"
+spacing = "normal"
 serifs = "sans"
-no-cv-ss = false
-# リガチャを明示的に有効化
-no-ligation = false
+noCvSs = true
+exportGlyphNames = false
 
-  [buildPlans.iosevkacustom.names]
-  family = "Iosevka Custom"
-  subfamily = "Regular"
-  full = "Iosevka Custom Regular"
-  postscript = "Iosevka-Custom-Regular"
-  
+  [buildPlans.IosevkaCustom.variants]
+  inherits = "ss12"
 
+    [buildPlans.IosevkaCustom.variants.design]
+    eight = "crossing-asymmetric"
+    zero = "tall-slashed"
+    capital-q = "crossing"
+    f = "tailed-crossbar-at-half-ascender-height"
+    g = "single-storey-earless-corner"
+    i = "semi-tailed"
+    l = "serifed-semi-tailed"
+    x = "semi-chancery-straight-serifless"
+    y = "curly-turn-serifless"
+    asterisk = "turn-hex-low"
+    dollar = "through"
+    cent = "through"
+    lig-neq = "slightly-slanted-dotted"
+    lig-equal-chain = "without-notch"
+    lig-hyphen-chain = "without-notch"
+    lig-plus-chain = "without-notch"
 
+    [buildPlans.IosevkaCustom.variants.oblique]
+    lig-neq = "slightly-slanted-dotted"
+    lig-equal-chain = "without-notch"
+    lig-hyphen-chain = "without-notch"
+    lig-plus-chain = "without-notch"
 
-  [buildPlans.iosevkacustom.variants.design]
-  cv10 = 22
-  cv19 = 3
-  cv20 = 4
-  cv22 = 3
-  cv26 = 2
-  cv32 = 45
-  cv33 = 4
-  cv36 = 2
-  cv41 = 20
-  cv42 = 12
-  cv44 = 12
-  cv45 = 7
-  cv46 = 21
-  cv47 = 12
-  cv51 = 8
-  cv52 = 17
-  cv56 = 4
-  cv57 = 25
-  cv58 = 14
-  cv59 = 18
-  cv60 = 19
-  lig-neq = "vertical-dotted"
-lig-equal-chain = "without-notch"
-  # 【レギュラー指定時】にイタリックの形状（しっぽ付き）を割り当てる
-  [buildPlans.iosevkacustom.variants.upright]
-  i = "tailed-serifed"
-  l = "tailed-serifed"
-  capital-i = "serifed"
-  capital-l = "serifed"
-
-  # 【イタリック指定時】にレギュラーの形状（直線的）を割り当てる
-  [buildPlans.iosevkacustom.variants.italic]
-  i = "serifed"
-  l = "serifed"
-  capital-i = "serifed"
-  capital-l = "serifed"
-
-[buildPlans.iosevkacustom.weights.Regular]
+[buildPlans.IosevkaCustom.weights.Regular]
 shape = 400
-menu  = 400
-css   = 400
+menu = 400
+css = 400
 
-[buildPlans.iosevkacustom.slopes.Upright]
-angle = 0
+[buildPlans.IosevkaCustom.weights.Bold]
+shape = 700
+menu = 700
+css = 700
+
+[buildPlans.IosevkaCustom.slopes.Upright]
+angle = 1.6
 shape = "upright"
-menu  = "upright"
-css   = "normal"
+menu = "upright"
+css = "normal"
+
+[buildPlans.IosevkaCustom.slopes.Italic]
+angle = 10.4
+shape = "italic"
+menu = "italic"
+css = "italic"
