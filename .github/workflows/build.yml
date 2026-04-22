@@ -24,7 +24,7 @@ jobs:
         # 環境変数でプランファイルを指定し、TTF形式でビルドを実行
         env:
           IOSEVKA_CUSTOM_PLAN_PATH: private-build-plans.toml
-        run: npm run build -- ttf::iosevkacustom
+        run: npm run build -- ttf::IosevkaCustom
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
