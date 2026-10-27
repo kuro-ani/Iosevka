@@ -14,11 +14,18 @@ jobs:
           node-version: 20
           cache: 'npm'
 
+      # Pythonと、フォント編集ライブラリ（fonttools）をセットアップ
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
       - name: Install Dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y ttfautohint
           npm install
+          pip install fonttools
 
       - name: Build Font
         # 環境変数でプランファイルを指定し、TTF形式でビルドを実行
@@ -26,10 +33,59 @@ jobs:
           IOSEVKA_CUSTOM_PLAN_PATH: private-build-plans.toml
         run: npm run build -- ttf::IosevkaCustom
 
+      # 🌟【ここを追加】出力されたすべてのTTFファイルの「<=」「>=」リガチャを2本線にパッチする
+      - name: Patch Ligatures to Japanese Style (≦ and ≧)
+        shell: python
+        run: |
+          import os
+          import glob
+          from fontTools.ttLib import TTFont
+
+          # プロジェクト内のすべてのTTFファイルを再帰的に検索してパッチを適用
+          ttf_files = glob.glob("**/*.ttf", recursive=True)
+
+          for ttf_path in ttf_files:
+              # ひな形（保存用テンポラリなど）は除外
+              if "node_modules" in ttf_path:
+                  continue
+
+              print(f"Processing font: {ttf_path}")
+              font = TTFont(ttf_path)
+              glyf_table = font['glyf']
+              cmap = font['cmap'].getBestCmap()
+              glyph_order = font.getGlyphOrder()
+
+              # 1. Unicodeから「≦」と「≧」のグリフ名（文字データ名）を確実に自動取得
+              glyph_2266 = cmap.get(0x2266)  # ≦
+              glyph_2268 = cmap.get(0x2268)  # ≧
+
+              # 2. フォント内から「less」と「equal」が合体したリガチャのグリフ名を自動取得
+              lig_less_equal = [g for g in glyph_order if 'less' in g and 'equal' in g and g not in ['less', 'equal', glyph_2266]]
+              lig_greater_equal = [g for g in glyph_order if 'greater' in g and 'equal' in g and g not in ['greater', 'equal', glyph_2268]]
+
+              # 3. データを上書きデッドコピー (形を ≦ と ≧ に固定)
+              patched = False
+              if glyph_2266 and lig_less_equal:
+                  for lig in lig_less_equal:
+                      glyf_table[lig] = glyf_table[glyph_2266]
+                  print(f"  -> Successfully patched '<=' to '≦' (Target glyphs: {lig_less_equal})")
+                  patched = True
+
+              if glyph_2268 and lig_greater_equal:
+                  for lig in lig_greater_equal:
+                      glyf_table[lig] = glyf_table[glyph_2268]
+                  print(f"  -> Successfully patched '>=' to '≧' (Target glyphs: {lig_greater_equal})")
+                  patched = True
+
+              # 変更があった場合のみ保存
+              if patched:
+                  font.save(ttf_path)
+                  print(f"  -> Saved changes for {ttf_path}")
+
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
           name: iosevka-custom-font
-          # ビルドされたすべての .ttf ファイルを回収
+          # パッチ適用済みのすべての .ttf ファイルを回収
           path: "**/*.ttf"
           if-no-files-found: error
