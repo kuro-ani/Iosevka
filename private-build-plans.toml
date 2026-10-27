@@ -37,10 +37,10 @@ exportGlyphNames = false
     lig-plus-chain = "without-notch"
 
  # 🌟 修正：inherits を "code" に変更し、リガチャグループを正しく指定しました
+ # 🌟 最新版Iosevkaの仕様に合わせて、inheritsを削除し直接有効化します
   [buildPlans.IosevkaCustom.ligations]
-  inherits = "code"
   enables = ["unslanted-less-equal", "unslanted-greater-equal"]
-
+  
 [buildPlans.IosevkaCustom.weights.Regular]
 shape = 400
 menu = 400
