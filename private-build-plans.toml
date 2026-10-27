@@ -30,11 +30,16 @@ exportGlyphNames = false
     lig-hyphen-chain = "without-notch"
     lig-plus-chain = "without-notch"
 
-	    [buildPlans.IosevkaCustom.variants.oblique]
+    [buildPlans.IosevkaCustom.variants.oblique]
     lig-neq = "slightly-slanted-dotted"
     lig-equal-chain = "without-notch"
     lig-hyphen-chain = "without-notch"
     lig-plus-chain = "without-notch"
+
+  # 🌟 ここにお望みの「≦」「≧」の二本線リガチャ設定を追加しました
+  [buildPlans.IosevkaCustom.ligations]
+  inherits = "default"
+  enables = ["unslanted-less-equal", "unslanted-greater-equal"]
 
 [buildPlans.IosevkaCustom.weights.Regular]
 shape = 400
