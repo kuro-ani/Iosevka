@@ -36,9 +36,9 @@ exportGlyphNames = false
     lig-hyphen-chain = "without-notch"
     lig-plus-chain = "without-notch"
 
-  # 🌟 ここにお望みの「≦」「≧」の二本線リガチャ設定を追加しました
+ # 🌟 修正：inherits を "code" に変更し、リガチャグループを正しく指定しました
   [buildPlans.IosevkaCustom.ligations]
-  inherits = "default"
+  inherits = "code"
   enables = ["unslanted-less-equal", "unslanted-greater-equal"]
 
 [buildPlans.IosevkaCustom.weights.Regular]
