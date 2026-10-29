@@ -1,4 +1,36 @@
-      # 🌟【完全修正版】TransformPenを使い、日本語グリフを数学的に横3:5に縮小・文字幅をリサイズする
+name: Build Custom Iosevka
+on: workflow_dispatch
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ttfautohint
+          npm install
+          pip install fonttools
+
+      - name: Build Base Font
+        env:
+          IOSEVKA_CUSTOM_PLAN_PATH: private-build-plans.toml
+        run: npm run build -- 'ttf::IosevkaCustom'
+
       - name: Create Machiko Font (Merge and Re-scale to 3:5)
         shell: python
         run: |
@@ -61,8 +93,7 @@
                       scale_x = target_ja_width / (orig_ja_width * em_scale)
                       scale_y = em_scale
 
-                      # 🌟【ここが正しい正解】実在するペンツールを使って、座標をアフィン変換で縮小変形
-                      # 行列：(scale_x, 0, 0, scale_y, 0, 0) で横だけをきれいに潰します
+                      # 実在するペンツールを使って、座標をアフィン変換で縮小変形
                       t_pen = TTGlyphPen(base_glyph_set)
                       trans_pen = TransformPen(t_pen, (scale_x, 0.0, 0.0, scale_y, 0.0, 0.0))
                       
@@ -85,3 +116,12 @@
 
               base_font.save(machiko_path)
           print("All Machiko fonts generated successfully with 3:5 layout.")
+
+      - name: Upload Both Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: iosevka-and-machiko-fonts
+          path: |
+            dist/**/*.ttf
+            dist_machiko/*.ttf
+          if-no-files-found: error
