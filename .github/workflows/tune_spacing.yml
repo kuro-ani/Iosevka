@@ -1,11 +1,11 @@
-name: Tune Machiko Spacing (Fast)
+name: Tune Machiko Spacing Fast
 on:
   workflow_dispatch:
     inputs:
       shrink_ratio:
-        description: 'Glyph Shrink Ratio (e.g., 0.92)'
+        description: "Glyph Shrink Ratio (e.g., 0.92)"
         required: true
-        default: '0.92'
+        default: "0.92"
 
 jobs:
   tune:
@@ -17,7 +17,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
+          python-version: "3.10"
 
       - name: Install Dependencies
         run: |
@@ -25,27 +25,22 @@ jobs:
           sudo apt-get install -y xxd
           pip install fonttools
 
-      # 1. 毎回テキストから起こすのは一瞬（1秒未満）なので、ここは安全のため実行
       - name: Restore Zen Maru Gothic from Local Hex Text
         run: |
           xxd -r -p zen_hex.txt > ./ZenMaruGothic-Light.ttf
 
-      # 2. 【ここがスキップ】前回のビルド成功成果物をGitHubから引っ張ってくる
-      # ※ もし過去のRunがない場合は、通常のbuild.ymlを1度動かしておく必要があります
       - name: Download Base Iosevka Artifact
         uses: actions/download-artifact@v4
         with:
           name: iosevka-and-machiko-fonts
           path: ./dist_downloaded
 
-      # ダウンロードしたファイルの配置をスクリプトが認識できる位置（dist/）に整理
       - name: Prepare Workspace
         run: |
           mkdir -p dist
           find ./dist_downloaded -name "IosevkaCustom*.ttf" -exec cp {} ./dist/ \;
           ls -R dist/
 
-      # 3. 爆速でPythonによる文字幅調整＆マージだけを実行（入力した比率を反映）
       - name: Create Machiko Font (Merge and Re-scale to 3:5)
         shell: python
         env:
@@ -78,7 +73,6 @@ jobs:
               }
           ja_font.close()
 
-          # Actionsの入力値（0.92など）を読み込む
           GLYPH_SHRINK_RATIO = float(os.environ.get("RATIO", 0.92))
           print(f"Applying GLYPH_SHRINK_RATIO: {GLYPH_SHRINK_RATIO}")
 
