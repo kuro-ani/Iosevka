@@ -59,6 +59,7 @@ jobs:
               
               print(f"Processing 3:5 scale merge: {machiko_path}")
               
+              # 🌟【最重要修正】ja_fontは毎ループ、完全にクリーンな元のファイルから新規に読み込みます
               base_font = TTFont(ttf_path)
               ja_font = TTFont(ja_font_path)
 
@@ -93,7 +94,7 @@ jobs:
                       scale_x = target_ja_width / (orig_ja_width * em_scale)
                       scale_y = em_scale
 
-                      # 実在するペンツールを使って、座標をアフィン変換で縮小変形
+                      # 座標をアフィン変換で縮小変形
                       t_pen = TTGlyphPen(base_glyph_set)
                       trans_pen = TransformPen(t_pen, (scale_x, 0.0, 0.0, scale_y, 0.0, 0.0))
                       
@@ -114,7 +115,9 @@ jobs:
                       text = text.replace("IosevkaCustom", "Machiko")
                       name_record.string = text.encode('utf-16-be')
 
+              # base_font側だけを新フォルダに保存（元のZen丸ゴシックファイルは一切汚されません）
               base_font.save(machiko_path)
+              
           print("All Machiko fonts generated successfully with 3:5 layout.")
 
       - name: Upload Both Artifacts
