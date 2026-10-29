@@ -50,6 +50,30 @@ jobs:
           
           os.makedirs("dist_machiko", exist_ok=True)
 
+          # 🌟【最重要】最初に和文フォントから日本語データを完全に独立させてメモリへ吸い出す
+          print("Extracting and freezing Japanese glyphs from Zen Maru Gothic...")
+          ja_font = TTFont(ja_font_path)
+          ja_cmap = ja_font['cmap'].getBestCmap()
+          ja_hmtx = ja_font['hmtx'].metrics
+          ja_glyph_set = ja_font.getGlyphSet()
+          ja_upem = ja_font['head'].unitsPerEm
+
+          # ループの外で、必要なデータをただの辞書オブジェクトとして完全にコピー
+          ja_frozen_glyphs = {}
+          for code, glyph_name in ja_cmap.items():
+              orig_ja_width, _ = ja_hmtx.get(glyph_name, (ja_upem, 0))
+              ja_frozen_glyphs[code] = {
+                  'glyph_name': glyph_name,
+                  'orig_width': orig_ja_width,
+                  'glyph_obj': ja_font['glyf'][glyph_name]
+              }
+
+          # 吸い出しが終わったら、Zen丸ゴシックのファイルとオブジェクトは完全に閉じて破棄
+          ja_font.close()
+          del ja_font
+          print("Japanese font data frozen in memory successfully.")
+
+          # 各Iosevkaのビルド成果物に対してマージを開始
           for ttf_path in built_files:
               if "node_modules" in ttf_path:
                   continue
@@ -59,54 +83,45 @@ jobs:
               
               print(f"Processing 3:5 scale merge: {machiko_path}")
               
-              # 🌟【最重要修正】ja_fontは毎ループ、完全にクリーンな元のファイルから新規に読み込みます
               base_font = TTFont(ttf_path)
-              ja_font = TTFont(ja_font_path)
-
               base_cmap = base_font['cmap'].getBestCmap()
-              ja_cmap = ja_font['cmap'].getBestCmap()
               base_hmtx = base_font['hmtx'].metrics
-              ja_hmtx = ja_font['hmtx'].metrics
+              base_glyph_set = base_font.getGlyphSet()
+              base_upem = base_font['head'].unitsPerEm
 
               # 1. Iosevkaの半角英数 'A' の横幅を基準として取得
               iosevka_half_width, _ = base_hmtx.get('A', (500, 0))
               
               # 2. 3:5の比率を維持するため、日本語（全角）のあるべきターゲット横幅を計算
               target_ja_width = int(iosevka_half_width * 5 / 3)
-              print(f"  Iosevka half width: {iosevka_half_width} -> Target Japanese width: {target_ja_width}")
 
               # 3. 縦横のEMサイズの違いを吸収する倍率を計算
-              base_upem = base_font['head'].unitsPerEm
-              ja_upem = ja_font['head'].unitsPerEm
               em_scale = base_upem / ja_upem
 
-              # 4. グリフセットとペンオブジェクトの用意
-              base_glyph_set = base_font.getGlyphSet()
-              ja_glyph_set = ja_font.getGlyphSet()
-
-              # 5. 日本語グリフを横方向のみ縮小（長体化）して注入
-              for code, glyph_name in ja_cmap.items():
+              # 4. メモリ上の独立したデータから日本語グリフを縮小変形して注入
+              for code, data in ja_frozen_glyphs.items():
                   if code not in base_cmap:
-                      # 元の日本語文字の幅を取得
-                      orig_ja_width, _ = ja_hmtx.get(glyph_name, (ja_upem, 0))
+                      glyph_name = data['glyph_name']
+                      orig_ja_width = data['orig_width']
                       
                       # 横方向の正確な長体化スケール（3:5用）を算出
                       scale_x = target_ja_width / (orig_ja_width * em_scale)
                       scale_y = em_scale
 
-                      # 座標をアフィン変換で縮小変形
+                      # 完全に新しく独立したグリフデータをペンツールで書き出し
                       t_pen = TTGlyphPen(base_glyph_set)
                       trans_pen = TransformPen(t_pen, (scale_x, 0.0, 0.0, scale_y, 0.0, 0.0))
                       
-                      ja_glyph_set[glyph_name].draw(trans_pen)
+                      # 凍結したデータから形状を取り出して描画
+                      data['glyph_obj'].draw(trans_pen, base_font['glyf'])
                       transformed_glyph = t_pen.glyph()
 
-                      # Iosevka側に変形済みの形と、3:5にリサイズした文字幅データを登録
+                      # Iosevka側のテーブルに完全独立したデータとして登録
                       base_font['glyf'][glyph_name] = transformed_glyph
                       base_cmap[code] = glyph_name
                       base_hmtx[glyph_name] = (target_ja_width, 0)
 
-              # 6. フォントファミリーのメタデータを「Machiko」に完全書き換え
+              # 5. フォントファミリーのメタデータを「Machiko」に完全書き換え
               target_name_ids = (1, 3, 4, 6, 16, 17)
               for name_record in base_font['name'].names:
                   if name_record.nameId in target_name_ids:
@@ -115,8 +130,9 @@ jobs:
                       text = text.replace("IosevkaCustom", "Machiko")
                       name_record.string = text.encode('utf-16-be')
 
-              # base_font側だけを新フォルダに保存（元のZen丸ゴシックファイルは一切汚されません）
+              # 完全に安全に保存（他のオブジェクトを破壊しません）
               base_font.save(machiko_path)
+              base_font.close()
               
           print("All Machiko fonts generated successfully with 3:5 layout.")
 
