@@ -1,0 +1,150 @@
+name: Tune Machiko Spacing (Fast)
+on:
+  workflow_dispatch:
+    inputs:
+      shrink_ratio:
+        description: 'Glyph Shrink Ratio (e.g., 0.92)'
+        required: true
+        default: '0.92'
+
+jobs:
+  tune:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xxd
+          pip install fonttools
+
+      # 1. 毎回テキストから起こすのは一瞬（1秒未満）なので、ここは安全のため実行
+      - name: Restore Zen Maru Gothic from Local Hex Text
+        run: |
+          xxd -r -p zen_hex.txt > ./ZenMaruGothic-Light.ttf
+
+      # 2. 【ここがスキップ】前回のビルド成功成果物をGitHubから引っ張ってくる
+      # ※ もし過去のRunがない場合は、通常のbuild.ymlを1度動かしておく必要があります
+      - name: Download Base Iosevka Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: iosevka-and-machiko-fonts
+          path: ./dist_downloaded
+
+      # ダウンロードしたファイルの配置をスクリプトが認識できる位置（dist/）に整理
+      - name: Prepare Workspace
+        run: |
+          mkdir -p dist
+          find ./dist_downloaded -name "IosevkaCustom*.ttf" -exec cp {} ./dist/ \;
+          ls -R dist/
+
+      # 3. 爆速でPythonによる文字幅調整＆マージだけを実行（入力した比率を反映）
+      - name: Create Machiko Font (Merge and Re-scale to 3:5)
+        shell: python
+        env:
+          RATIO: ${{ github.event.inputs.shrink_ratio }}
+        run: |
+          import os
+          import glob
+          from fontTools.ttLib import TTFont
+          from fontTools.pens.transformPen import TransformPen
+          from fontTools.pens.ttGlyphPen import TTGlyphPen
+
+          ja_font_path = "ZenMaruGothic-Light.ttf"
+          built_files = glob.glob("dist/**/*.ttf", recursive=True)
+          os.makedirs("dist_machiko", exist_ok=True)
+
+          print("Extracting Japanese glyphs...")
+          ja_font = TTFont(ja_font_path)
+          ja_cmap = ja_font['cmap'].getBestCmap()
+          ja_hmtx = ja_font['hmtx'].metrics
+          ja_glyph_set = ja_font.getGlyphSet()
+          ja_upem = ja_font['head'].unitsPerEm
+
+          ja_frozen_glyphs = {}
+          for code, glyph_name in ja_cmap.items():
+              orig_ja_width, _ = ja_hmtx.get(glyph_name, (ja_upem, 0))
+              ja_frozen_glyphs[code] = {
+                  'glyph_name': glyph_name,
+                  'orig_width': orig_ja_width,
+                  'glyph_obj': ja_font['glyf'][glyph_name]
+              }
+          ja_font.close()
+
+          # Actionsの入力値（0.92など）を読み込む
+          GLYPH_SHRINK_RATIO = float(os.environ.get("RATIO", 0.92))
+          print(f"Applying GLYPH_SHRINK_RATIO: {GLYPH_SHRINK_RATIO}")
+
+          for ttf_path in built_files:
+              filename = os.path.basename(ttf_path)
+              machiko_path = os.path.join("dist_machiko", filename.replace("IosevkaCustom", "Machiko"))
+              print(f"Processing: {machiko_path}")
+              
+              base_font = TTFont(ttf_path)
+              base_cmap = base_font['cmap'].getBestCmap()
+              base_hmtx = base_font['hmtx'].metrics
+              base_glyph_set = base_font.getGlyphSet()
+              base_upem = base_font['head'].unitsPerEm
+              
+              iosevka_half_width, _ = base_hmtx.get('A', (500, 0))
+              target_ja_width = int(iosevka_half_width * 5 / 3)
+              em_scale = base_upem / ja_upem
+              
+              for code, data in ja_frozen_glyphs.items():
+                  if code not in base_cmap:
+                      glyph_name = data['glyph_name']
+                      orig_ja_width = data['orig_width']
+                      orig_glyph = data['glyph_obj']
+                      
+                      if orig_glyph.numberOfContours == 0:
+                          base_cmap[code] = glyph_name
+                          base_hmtx[glyph_name] = (target_ja_width, 0)
+                          continue
+                          
+                      orig_x_min = orig_glyph.xMin
+                      orig_x_max = orig_glyph.xMax
+                      orig_content_width = orig_x_max - orig_x_min
+                      
+                      if orig_content_width <= 0:
+                          orig_content_width = orig_ja_width
+                          orig_x_min = 0
+                      
+                      ideal_content_width = target_ja_width * GLYPH_SHRINK_RATIO
+                      scale_x = (ideal_content_width / orig_content_width) * em_scale
+                      scale_y = em_scale
+                      target_lsb = (target_ja_width - ideal_content_width) / 2
+                      offset_x = target_lsb - (orig_x_min * scale_x)
+                      
+                      t_pen = TTGlyphPen(base_glyph_set)
+                      trans_pen = TransformPen(t_pen, (scale_x, 0.0, 0.0, scale_y, offset_x, 0.0))
+                      orig_glyph.draw(trans_pen, base_font['glyf'])
+                      
+                      base_font['glyf'][glyph_name] = t_pen.glyph()
+                      base_cmap[code] = glyph_name
+                      base_hmtx[glyph_name] = (target_ja_width, int(target_lsb))
+                      
+              target_name_ids = (1, 3, 4, 6, 16, 17)
+              for name_record in base_font['name'].names:
+                  if name_record.nameID in target_name_ids:
+                      text = name_record.toUnicode()
+                      text = text.replace("Iosevka Custom", "Machiko").replace("IosevkaCustom", "Machiko")
+                      name_record.string = text.encode('utf-16-be')
+                      
+              if 'OS/2' in base_font: base_font['OS/2'].recalcXYZ(base_font)
+              if 'hhea' in base_font: base_font['hhea'].recalcXYZ(base_font)
+                  
+              base_font.save(machiko_path)
+              base_font.close()
+
+      - name: Upload Tuned Machiko Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: machiko-tuned-fonts
+          path: dist_machiko/*.ttf
