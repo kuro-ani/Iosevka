@@ -1,44 +1,12 @@
-name: Build Custom Iosevka
-on: workflow_dispatch
-
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: 'npm'
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.10'
-
-      - name: Install Dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y ttfautohint
-          npm install
-          pip install fonttools
-
-      - name: Build Base Font
-        env:
-          IOSEVKA_CUSTOM_PLAN_PATH: private-build-plans.toml
-        run: npm run build -- 'ttf::IosevkaCustom'
-
-      # 🌟【3:5物理長体マージ】グリフの形状を横に縮小し、文字幅データを完全に3:5仕様に書き換える
+      # 🌟【完全修正版】TransformPenを使い、日本語グリフを数学的に横3:5に縮小・文字幅をリサイズする
       - name: Create Machiko Font (Merge and Re-scale to 3:5)
         shell: python
         run: |
           import os
           import glob
           from fontTools.ttLib import TTFont
-          from fontTools.ttLib.tables._g_l_y_f import GlyphTransform
+          from fontTools.pens.transformPen import TransformPen
+          from fontTools.pens.ttGlyphPen import TTGlyphPen
 
           ja_font_path = "ZenMaruGothic-Light.ttf"
           if not os.path.exists(ja_font_path):
@@ -67,49 +35,46 @@ jobs:
               base_hmtx = base_font['hmtx'].metrics
               ja_hmtx = ja_font['hmtx'].metrics
 
-              # 1. Iosevkaの半角英数（例: 'A'）の advanceWidth を基準値として取得
-              # ※もし何らかの理由で 'A' が取得できない場合はデフォルトの等幅（500）を想定
-              iosevka_half_width = base_hmtx.get('A', (500, 0))[0]
+              # 1. Iosevkaの半角英数 'A' の横幅を基準として取得
+              iosevka_half_width, _ = base_hmtx.get('A', (500, 0))
               
-              # 2. 3:5の比率を厳守するため、全角（日本語）のあるべきターゲット横幅を計算
-              # 半角幅 × (5 / 3) = 全角幅
+              # 2. 3:5の比率を維持するため、日本語（全角）のあるべきターゲット横幅を計算
               target_ja_width = int(iosevka_half_width * 5 / 3)
               print(f"  Iosevka half width: {iosevka_half_width} -> Target Japanese width: {target_ja_width}")
 
-              # 3. 縦横のフォントスケール（EMサイズ）の違いを吸収する倍率を計算
+              # 3. 縦横のEMサイズの違いを吸収する倍率を計算
               base_upem = base_font['head'].unitsPerEm
               ja_upem = ja_font['head'].unitsPerEm
               em_scale = base_upem / ja_upem
 
-              # 4. 日本語グリフの注入 ＆ 形状の「横方向のみ縮小（長体化）」マトリクス計算
-              # 元の日本語フォントの全角幅（通常は ja_upem と同じ）から、ターゲット幅への縮尺
-              # X方向（横）の縮小率 = target_ja_width / (元の日本語幅 * em_scale)
-              # Y方向（縦）の倍率 = em_scale (高さはIosevkaに完全に合わせる)
+              # 4. グリフセットとペンオブジェクトの用意
+              base_glyph_set = base_font.getGlyphSet()
+              ja_glyph_set = ja_font.getGlyphSet()
+
+              # 5. 日本語グリフを横方向のみ縮小（長体化）して注入
               for code, glyph_name in ja_cmap.items():
                   if code not in base_cmap:
                       # 元の日本語文字の幅を取得
-                      orig_ja_width = ja_hmtx.get(glyph_name, (ja_upem, 0))[0]
+                      orig_ja_width, _ = ja_hmtx.get(glyph_name, (ja_upem, 0))
                       
                       # 横方向の正確な長体化スケール（3:5用）を算出
                       scale_x = target_ja_width / (orig_ja_width * em_scale)
                       scale_y = em_scale
 
-                      # グリフの形状データを引き出す
-                      ja_glyph = ja_font['glyf'][glyph_name]
+                      # 🌟【ここが正しい正解】実在するペンツールを使って、座標をアフィン変換で縮小変形
+                      # 行列：(scale_x, 0, 0, scale_y, 0, 0) で横だけをきれいに潰します
+                      t_pen = TTGlyphPen(base_glyph_set)
+                      trans_pen = TransformPen(t_pen, (scale_x, 0.0, 0.0, scale_y, 0.0, 0.0))
                       
-                      # 物理的な文字の輪郭線（アウトラインの座標）を横にギュッと縮小変形
-                      if not ja_glyph.isComposite():
-                          ja_glyph.transform(GlyphTransform(scale_x, 0, 0, scale_y, 0, 0))
-                      
-                      # Iosevkaのデータベースへグリフと文字幅データを登録
-                      base_font['glyf'][glyph_name] = ja_glyph
+                      ja_glyph_set[glyph_name].draw(trans_pen)
+                      transformed_glyph = t_pen.glyph()
+
+                      # Iosevka側に変形済みの形と、3:5にリサイズした文字幅データを登録
+                      base_font['glyf'][glyph_name] = transformed_glyph
                       base_cmap[code] = glyph_name
-                      
-                      # 【最重要】文字の横幅データ（前進幅）を 3:5 の計算値に完全書き換え
-                      # これにより、エディタ上で文字同士が絶対に重ならなくなります
                       base_hmtx[glyph_name] = (target_ja_width, 0)
 
-              # 5. フォントファミリーのメタデータを「Machiko」に完全書き換え
+              # 6. フォントファミリーのメタデータを「Machiko」に完全書き換え
               target_name_ids = (1, 3, 4, 6, 16, 17)
               for name_record in base_font['name'].names:
                   if name_record.nameId in target_name_ids:
@@ -120,13 +85,3 @@ jobs:
 
               base_font.save(machiko_path)
           print("All Machiko fonts generated successfully with 3:5 layout.")
-
-      # 「単体版（dist）」と「縦長3:5変形マージ版（dist_machiko）」の2つのフォルダをまとめてArtifactとして回収
-      - name: Upload Both Artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: iosevka-and-machiko-fonts
-          path: |
-            dist/**/*.ttf
-            dist_machiko/*.ttf
-          if-no-files-found: error
