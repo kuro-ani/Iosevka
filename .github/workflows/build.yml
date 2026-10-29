@@ -1,5 +1,11 @@
-name: Build Custom Iosevka
-on: workflow_dispatch
+name: Build Custom Iosevka and Tune Machiko
+on:
+  workflow_dispatch:
+    inputs:
+      shrink_ratio:
+        description: "Glyph Shrink Ratio (e.g., 0.92)"
+        required: true
+        default: "0.92"
 
 jobs:
   build:
@@ -22,25 +28,35 @@ jobs:
       - name: Install Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y ttfautohint
-          npm install
+          sudo apt-get install -y ttfautohint npm xxd
           pip install fonttools
 
-      # 1. 🌟【完全ローカル復元】外部通信を一切せず、あなたのテキストから本物の和文フォントを復元
+      # --- 【超高速化】Iosevkaのビルド結果をまるごとキャッシュ ---
+      - name: Cache Iosevka Build Outputs
+        id: cache-iosevka
+        uses: actions/cache@v4
+        with:
+          path: dist/
+          key: iosevka-base-dist-${{ hashFiles('private-build-plans.toml') }}
+
+      # 毎回テキストから起こすのは一瞬（1秒未満）なので、ここは常に実行して安全を確保
       - name: Restore Zen Maru Gothic from Local Hex Text
         run: |
           xxd -r -p zen_hex.txt > ./ZenMaruGothic-Light.ttf
           echo "Successfully restored base font from hex text safely."
 
-      # 2. 🌟【ベースビルド】あなたのこだわり形状(ss12)と死守ウエイト(400/700)で英数をビルド
+      # 【条件付き実行】TOMLに変更がない限り、10分以上かかるこの重いビルドは自動スキップ！
       - name: Build Base Font
+        if: steps.cache-iosevka.outputs.cache-hit != 'true'
         env:
           IOSEVKA_CUSTOM_PLAN_PATH: private-build-plans.toml
         run: npm run build -- 'ttf::IosevkaCustom'
 
-      # 3. 🌟【物理3:5長体マージ】日本語の形を横にギュッと縮め、文字幅を1.666倍に完全リサイズする
+      # 入力された数値（0.92など）を反映して、中央寄せ＆余白調整マージを毎回実行（数十秒）
       - name: Create Machiko Font (Merge and Re-scale to 3:5)
         shell: python
+        env:
+          RATIO: ${{ github.event.inputs.shrink_ratio }}
         run: |
           import os
           import glob
@@ -55,10 +71,9 @@ jobs:
           built_files = glob.glob("dist/**/*.ttf", recursive=True)
           if not built_files:
               raise FileNotFoundError("No built Iosevka fonts found in dist/ directory.")
-          
+
           os.makedirs("dist_machiko", exist_ok=True)
 
-          # データの相互破壊を防ぐため、最初に和文データをただのPython辞書として安全に退避
           print("Extracting and freezing Japanese glyphs from Zen Maru Gothic...")
           ja_font = TTFont(ja_font_path)
           ja_cmap = ja_font['cmap'].getBestCmap()
@@ -77,65 +92,79 @@ jobs:
           ja_font.close()
           del ja_font
 
-          # 出力された各Iosevkaフォントに対して、3:5縮小マージパッチを当てる
+          # Actionsの画面で入力された比率を取得（デフォルトは 0.92）
+          GLYPH_SHRINK_RATIO = float(os.environ.get("RATIO", 0.92))
+          print(f"Applying GLYPH_SHRINK_RATIO: {GLYPH_SHRINK_RATIO}")
+
           for ttf_path in built_files:
               if "node_modules" in ttf_path:
                   continue
-
               filename = os.path.basename(ttf_path)
               machiko_path = os.path.join("dist_machiko", filename.replace("IosevkaCustom", "Machiko"))
-              
-              print(f"Processing 3:5 scale merge: {machiko_path}")
+              print(f"Processing 3:5 balanced scale merge: {machiko_path}")
               
               base_font = TTFont(ttf_path)
               base_cmap = base_font['cmap'].getBestCmap()
               base_hmtx = base_font['hmtx'].metrics
               base_glyph_set = base_font.getGlyphSet()
               base_upem = base_font['head'].unitsPerEm
-
-              # Iosevkaの半角幅（例: 'A'）を取得
-              iosevka_half_width, _ = base_hmtx.get('A', (500, 0))
               
-              # 3:5の比率を厳守するため、全角（日本語）のあるべきターゲット横幅（1.666倍）を決定
+              iosevka_half_width, _ = base_hmtx.get('A', (500, 0))
               target_ja_width = int(iosevka_half_width * 5 / 3)
               em_scale = base_upem / ja_upem
-
-              # 日本語グリフの輪郭データを横方向のみ縮小（長体化）して注入
+              
               for code, data in ja_frozen_glyphs.items():
                   if code not in base_cmap:
                       glyph_name = data['glyph_name']
                       orig_ja_width = data['orig_width']
+                      orig_glyph = data['glyph_obj']
                       
-                      # 横方向の正確な長体化スケール（3:5用）を算出してアフィン変換
-                      scale_x = target_ja_width / (orig_ja_width * em_scale)
+                      if orig_glyph.numberOfContours == 0:
+                          base_cmap[code] = glyph_name
+                          base_hmtx[glyph_name] = (target_ja_width, 0)
+                          continue
+                          
+                      orig_x_min = orig_glyph.xMin
+                      orig_x_max = orig_glyph.xMax
+                      orig_content_width = orig_x_max - orig_x_min
+                      
+                      if orig_content_width <= 0:
+                          orig_content_width = orig_ja_width
+                          orig_x_min = 0
+                      
+                      ideal_content_width = target_ja_width * GLYPH_SHRINK_RATIO
+                      scale_x = (ideal_content_width / orig_content_width) * em_scale
                       scale_y = em_scale
-
-                      t_pen = TTGlyphPen(base_glyph_set)
-                      trans_pen = TransformPen(t_pen, (scale_x, 0.0, 0.0, scale_y, 0.0, 0.0))
                       
-                      data['glyph_obj'].draw(trans_pen, base_font['glyf'])
+                      target_lsb = (target_ja_width - ideal_content_width) / 2
+                      offset_x = target_lsb - (orig_x_min * scale_x)
+                      
+                      t_pen = TTGlyphPen(base_glyph_set)
+                      trans_pen = TransformPen(t_pen, (scale_x, 0.0, 0.0, scale_y, offset_x, 0.0))
+                      orig_glyph.draw(trans_pen, base_font['glyf'])
+                      
                       transformed_glyph = t_pen.glyph()
-
-                      # Iosevkaのデータテーブルを直接書き換える
                       base_font['glyf'][glyph_name] = transformed_glyph
                       base_cmap[code] = glyph_name
-                      base_hmtx[glyph_name] = (target_ja_width, 0)
-
-              # 4. 🌟【修正箇所】メタデータを「Machiko」に完全書き換え（nameId -> nameID に完全修正）
+                      base_hmtx[glyph_name] = (target_ja_width, int(target_lsb))
+                      
               target_name_ids = (1, 3, 4, 6, 16, 17)
               for name_record in base_font['name'].names:
                   if name_record.nameID in target_name_ids:
                       text = name_record.toUnicode()
-                      text = text.replace("Iosevka Custom", "Machiko")
-                      text = text.replace("IosevkaCustom", "Machiko")
+                      text = text.replace("Iosevka Custom", "Machiko").replace("IosevkaCustom", "Machiko")
                       name_record.string = text.encode('utf-16-be')
-
+                      
+              if 'OS/2' in base_font:
+                  base_font['OS/2'].recalcXYZ(base_font)
+              if 'hhea' in base_font:
+                  base_font['hhea'].recalcXYZ(base_font)
+                  
               base_font.save(machiko_path)
               base_font.close()
-              
-          print("All Machiko fonts generated successfully with 3:5 layout.")
 
-      # 4. 🌟【2種同時回収】単体版（dist）と、縦長3:5マージ版（dist_machiko）をまとめてアップロード
+          print("All Machiko fonts generated successfully with balanced 3:5 layout.")
+
       - name: Upload Both Artifacts
         uses: actions/upload-artifact@v4
         with:
