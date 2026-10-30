@@ -54,7 +54,7 @@ jobs:
           IOSEVKA_CUSTOM_PLAN_PATH: private-build-plans.toml
         run: npm run build -- 'ttf::IosevkaCustom'
 
-      # 複合グリフの構造を完全に維持する精密マージ処理
+      # パーツ参照を完全に実体輪郭へ分解して移植するIME豆腐対策版
       - name: Create Machiko Font (Merge and Re-scale to 3:5)
         shell: python
         env:
@@ -63,7 +63,9 @@ jobs:
           import os
           import glob
           from fontTools.ttLib import TTFont
+          from fontTools.pens.transformPen import TransformPen
           from fontTools.pens.ttGlyphPen import TTGlyphPen
+          from fontTools.pens.decomposingPen import DecomposingPen
 
           ja_font_path = "ZenMaruGothic-Light.ttf"
           if not os.path.exists(ja_font_path):
@@ -90,7 +92,7 @@ jobs:
                   continue
               filename = os.path.basename(ttf_path)
               machiko_path = os.path.join("dist_machiko", filename.replace("IosevkaCustom", "Machiko"))
-              print(f"Generating Machiko via Precision Composite Pipeline: {machiko_path}")
+              print(f"Generating Machiko via Decomposing Pipeline: {machiko_path}")
               
               # 日本語フォント（Zen丸ゴシック）を「土台」にする
               out_font = TTFont(ja_font_path)
@@ -103,6 +105,7 @@ jobs:
               v_font = TTFont(ttf_path)
               v_cmap = v_font['cmap'].getBestCmap()
               v_hmtx = v_font['hmtx'].metrics
+              v_glyph_set = v_font.getGlyphSet()
               
               em_scale = out_upem / base_upem
               
@@ -113,13 +116,10 @@ jobs:
                       continue
                       
                   orig_glyph = out_glyf[g_name]
-                  
-                  # 輪郭が存在しない文字（スペースなど）は幅のみ同期
                   if orig_glyph.numberOfContours == 0:
                       out_hmtx[g_name] = (target_ja_width, 0)
                       continue
                   
-                  # 元のパーツ形状の境界を取得
                   orig_x_min = orig_glyph.xMin
                   orig_x_max = orig_glyph.xMax
                   orig_content_width = orig_x_max - orig_x_min
@@ -133,25 +133,22 @@ jobs:
                   target_lsb = (target_ja_width - ideal_content_width) / 2
                   offset_x = target_lsb - (orig_x_min * scale_x)
                   
-                  # --- 【最重要】コンポーネント構造を維持したまま、生の座標情報だけを数学的に変換 ---
                   if orig_glyph.isComposite():
-                      # 複合グリフの場合：構成パーツ（コンポーネント）の配置オフセット情報（引数）を直接書き換える
                       for comp in orig_glyph.components:
-                          # 既存のX方向の配置座標にスケールをかけ、さらに中央寄せオフセットを加算
                           comp.x = int(comp.x * scale_x + offset_x)
                   else:
-                      # 単一グリフの場合：すべての点のX座標を直接アフィン変換
                       transformed_coords = []
                       for x, y in orig_glyph.coordinates:
                           new_x = int(x * scale_x + offset_x)
                           transformed_coords.append((new_x, y))
                       orig_glyph.coordinates = transformed_coords
                   
-                  # 幅の更新（hmtxテーブル）
                   out_hmtx[g_name] = (target_ja_width, int(target_lsb))
                   
-              # ステップ2: Iosevkaの英数字グリフ（半角領域）を上書き移植
-              print("Injecting Iosevka customized Latin glyphs...")
+              # ステップ2: Iosevkaの英数字グリフ（半角領域）を分解実体化して精密移植
+              print("Injecting Decomposed Iosevka Latin glyphs...")
+              out_glyph_set = out_font.getGlyphSet()
+              
               for code, v_g_name in v_cmap.items():
                   if code < 0x2460:
                       ja_g_name = out_cmap.get(code)
@@ -161,11 +158,12 @@ jobs:
                           
                       v_width, v_lsb = v_hmtx[v_g_name]
                       
-                      # 新規に書き出す安全なテンポラリペンを使用してIosevkaをZen丸のUPEMにコピー
-                      t_pen = TTGlyphPen(out_font.getGlyphSet())
-                      from fontTools.pens.transformPen import TransformPen
+                      # 【最重要】DecomposingPen を噛ませて、Iosevkaの外部パーツ依存構造をここで完全にフラットな輪郭データへと分解消去する
+                      t_pen = TTGlyphPen(out_glyph_set)
                       trans_pen = TransformPen(t_pen, (em_scale, 0.0, 0.0, em_scale, 0.0, 0.0))
-                      v_font['glyf'][v_g_name].draw(trans_pen, v_font['glyf'])
+                      decomp_pen = DecomposingPen(trans_pen, glyphSet=v_glyph_set)
+                      
+                      v_glyph_set[v_g_name].draw(decomp_pen)
                       
                       out_glyf[ja_g_name] = t_pen.glyph()
                       out_hmtx[ja_g_name] = (int(v_width * em_scale), int(v_lsb * em_scale))
@@ -187,12 +185,11 @@ jobs:
                   else:
                       out_font['OS/2'].usWeightClass = 400
                       
-              # グリフの内部データ（xMin, yMin 等の境界ボックス）を正規に自動更新させて保存
               out_font['glyf'].recalcBBoxes(out_font)
               out_font.save(machiko_path)
               out_font.close()
 
-          print("All Machiko fonts generated successfully with safe composite geometry.")
+          print("All Machiko fonts generated successfully with safe flat-decomposed geometry.")
 
       - name: Upload Both Artifacts
         uses: actions/upload-artifact@v4
