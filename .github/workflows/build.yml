@@ -78,7 +78,7 @@ jobs:
 
           os.makedirs("dist_machiko", exist_ok=True)
 
-          # --- 基準値の取得（リストの最初の要素を参照するように確実に修正） ---
+          # --- 基準値の取得（リストの最初の要素を参照） ---
           sample_font = TTFont(built_files[0])
           base_upem = sample_font['head'].unitsPerEm
           iosevka_half_width, _ = sample_font['hmtx'].metrics.get('A', (500, 0))
@@ -205,15 +205,18 @@ jobs:
                   out_font['OS/2'].ulCodePageRange1 |= 0x00020001 # CP932(日本語) ＆ CP1252(ラテン)
                   out_font['OS/2'].ulUnicodeRange1 |= 0x50000000  # CJK 統合漢字 ＆ かな
                   
-                  # --- 【1:2引き伸ばしバグの修正】 ---
                   if hasattr(out_font['OS/2'], 'panose'):
-                      out_font['OS/2'].panose.bFamilyType = 2 # Text and Display
-                      out_font['OS/2'].panose.bSerifStyle = 11 # Normal Sans
-                      out_font['OS/2'].panose.bProportion = 3  # Modern (1:2制限を回避し、独自の3:5ピッチを有効化する設定)
+                      out_font['OS/2'].panose.bFamilyType = 2 
+                      out_font['OS/2'].panose.bSerifStyle = 11 
+                      out_font['OS/2'].panose.bProportion = 3  # Modern
 
-              # postテーブルで固定ピッチフォントであることを明示
               if 'post' in out_font:
                   out_font['post'].isFixedPitch = 1
+
+              # --- 【IMEピッチ1:2強制化の完全解除】 ---
+              # hheaテーブルの最大文字幅を、今回のターゲット3:5幅（target_ja_width）へ精密に強制上書きする
+              if 'hhea' in out_font:
+                  out_font['hhea'].advanceWidthMax = int(target_ja_width)
 
               out_font.save(machiko_path)
               out_font.close()
