@@ -41,20 +41,20 @@ jobs:
           path: dist/
           key: iosevka-base-dist-${{ hashFiles('private-build-plans.toml') }}
 
-      # 16進数テキストから本物フォントを完全復元（1秒未満）
+      # 16進数テキストから本物フォントを完全復元
       - name: Restore Zen Maru Gothic from Local Hex Text
         run: |
           xxd -r -p zen_hex.txt > ./ZenMaruGothic-Light.ttf
           echo "Successfully restored base font from hex text safely."
 
-      # 【条件付き実行】TOMLに変更がない限り、自動スキップ
+      # 【条件付き実行】TOMLに変更がない限り自動スキップ
       - name: Build Base Font
         if: steps.cache-iosevka.outputs.cache-hit != 'true'
         env:
           IOSEVKA_CUSTOM_PLAN_PATH: private-build-plans.toml
         run: npm run build -- 'ttf::IosevkaCustom'
 
-      # 日本語フォントを土台にして、英数字を移植 ＆ 日本語のみを3:5変形する安全確実なマージ
+      # 複合グリフの構造を完全に維持する精密マージ処理
       - name: Create Machiko Font (Merge and Re-scale to 3:5)
         shell: python
         env:
@@ -63,7 +63,6 @@ jobs:
           import os
           import glob
           from fontTools.ttLib import TTFont
-          from fontTools.pens.transformPen import TransformPen
           from fontTools.pens.ttGlyphPen import TTGlyphPen
 
           ja_font_path = "ZenMaruGothic-Light.ttf"
@@ -76,7 +75,7 @@ jobs:
 
           os.makedirs("dist_machiko", exist_ok=True)
 
-          # --- 基準値の取得（built_filesの最初の要素を参照するように修正） ---
+          # --- 基準値の取得 ---
           sample_font = TTFont(built_files[0])
           base_upem = sample_font['head'].unitsPerEm
           iosevka_half_width, _ = sample_font['hmtx'].metrics.get('A', (500, 0))
@@ -91,75 +90,80 @@ jobs:
                   continue
               filename = os.path.basename(ttf_path)
               machiko_path = os.path.join("dist_machiko", filename.replace("IosevkaCustom", "Machiko"))
-              print(f"Generating Machiko via Japanese Base Pipeline: {machiko_path}")
+              print(f"Generating Machiko via Precision Composite Pipeline: {machiko_path}")
               
-              # 【最重要】壊してはいけない日本語フォント（Zen丸ゴシック）を「土台」として読み込む
+              # 日本語フォント（Zen丸ゴシック）を「土台」にする
               out_font = TTFont(ja_font_path)
               out_cmap = out_font['cmap'].getBestCmap()
               out_hmtx = out_font['hmtx'].metrics
               out_glyf = out_font['glyf']
-              out_glyph_set = out_font.getGlyphSet()
               out_upem = out_font['head'].unitsPerEm
               
-              # 比較用のIosevkaフォントを読み込む
+              # Iosevkaフォントの読み込み
               v_font = TTFont(ttf_path)
               v_cmap = v_font['cmap'].getBestCmap()
               v_hmtx = v_font['hmtx'].metrics
-              v_glyph_set = v_font.getGlyphSet()
               
-              em_scale = out_upem / base_upem  # IosevkaからZen丸へのスケール比
+              em_scale = out_upem / base_upem
               
-              # ステップ1: 日本語フォント側の全グリフのうち「日本語領域」だけを3:5に縮小・中央寄せ変形
-              print("Transforming core Japanese glyphs...")
+              # ステップ1: コンポーネントを一切壊さずに、日本語グリフデータのみを直接座標変換
+              print("Transforming core Japanese glyphs via direct coordinate math...")
               for code, g_name in list(out_cmap.items()):
-                  # 半角英数字領域（ASCIIコード等）は後でIosevkaで上書きするのでスキップ
                   if code < 0x7F:
                       continue
                       
                   orig_glyph = out_glyf[g_name]
+                  
+                  # 輪郭が存在しない文字（スペースなど）は幅のみ同期
                   if orig_glyph.numberOfContours == 0:
                       out_hmtx[g_name] = (target_ja_width, 0)
                       continue
-                      
+                  
+                  # 元のパーツ形状の境界を取得
                   orig_x_min = orig_glyph.xMin
                   orig_x_max = orig_glyph.xMax
                   orig_content_width = orig_x_max - orig_x_min
                   
                   if orig_content_width <= 0:
-                      orig_content_width = out_hmtx[g_name]
+                      orig_content_width = out_hmtx[g_name][0]
                       orig_x_min = 0
                       
-                  # 0.92などの比率に基づくターゲットの実体幅と左サイドベアリングの計算
                   ideal_content_width = target_ja_width * GLYPH_SHRINK_RATIO
                   scale_x = ideal_content_width / orig_content_width
-                  scale_y = 1.0  # 土台がすでにZen丸なので、縦方向のEMサイズ合わせは不要
-                  
                   target_lsb = (target_ja_width - ideal_content_width) / 2
                   offset_x = target_lsb - (orig_x_min * scale_x)
                   
-                  t_pen = TTGlyphPen(out_glyph_set)
-                  trans_pen = TransformPen(t_pen, (scale_x, 0.0, 0.0, scale_y, offset_x, 0.0))
-                  orig_glyph.draw(trans_pen, out_glyf)
+                  # --- 【最重要】コンポーネント構造を維持したまま、生の座標情報だけを数学的に変換 ---
+                  if orig_glyph.isComposite():
+                      # 複合グリフの場合：構成パーツ（コンポーネント）の配置オフセット情報（引数）を直接書き換える
+                      for comp in orig_glyph.components:
+                          # 既存のX方向の配置座標にスケールをかけ、さらに中央寄せオフセットを加算
+                          comp.x = int(comp.x * scale_x + offset_x)
+                  else:
+                      # 単一グリフの場合：すべての点のX座標を直接アフィン変換
+                      transformed_coords = []
+                      for x, y in orig_glyph.coordinates:
+                          new_x = int(x * scale_x + offset_x)
+                          transformed_coords.append((new_x, y))
+                      orig_glyph.coordinates = transformed_coords
                   
-                  out_glyf[g_name] = t_pen.glyph()
+                  # 幅の更新（hmtxテーブル）
                   out_hmtx[g_name] = (target_ja_width, int(target_lsb))
                   
-              # ステップ2: Iosevkaのこだわり英数字グリフ（半角領域）を土台へ精密移植
+              # ステップ2: Iosevkaの英数字グリフ（半角領域）を上書き移植
               print("Injecting Iosevka customized Latin glyphs...")
               for code, v_g_name in v_cmap.items():
-                  # 半角英数字領域および必要なプログラミング記号（BMPの基本領域）のみを精密移植
-                  if code < 0x2460:  # 日本語特有の記号や全角領域の手前までを対象にする
-                      # 土台（Zen丸）側の文字コードに対応するグリフ名を取得
+                  if code < 0x2460:
                       ja_g_name = out_cmap.get(code)
                       if not ja_g_name:
-                          # 存在しないコードであれば安全にマップを拡張
                           ja_g_name = v_g_name
                           out_cmap[code] = ja_g_name
                           
                       v_width, v_lsb = v_hmtx[v_g_name]
                       
-                      # Iosevkaの縦横サイズをZen丸ゴシックのUPEMにアラインさせて描画コピー
-                      t_pen = TTGlyphPen(out_glyph_set)
+                      # 新規に書き出す安全なテンポラリペンを使用してIosevkaをZen丸のUPEMにコピー
+                      t_pen = TTGlyphPen(out_font.getGlyphSet())
+                      from fontTools.pens.transformPen import TransformPen
                       trans_pen = TransformPen(t_pen, (em_scale, 0.0, 0.0, em_scale, 0.0, 0.0))
                       v_font['glyf'][v_g_name].draw(trans_pen, v_font['glyf'])
                       
@@ -173,22 +177,22 @@ jobs:
               for name_record in out_font['name'].names:
                   if name_record.nameID in target_name_ids:
                       text = name_record.toUnicode()
-                      # 元がZen丸ゴシックの名前になっているので、完全にMachikoブランドに書き換える
                       text = text.replace("Zen Maru Gothic", "Machiko").replace("ZenMaruGothic", "Machiko")
                       text = text.replace("Light", filename.replace("IosevkaCustom-", "").replace(".ttf", ""))
                       name_record.string = text.encode('utf-16-be')
                       
-              # 土台がZen丸なので、OS/2テーブルのウエイト値クラス（400/700）をIosevkaに合わせて厳格同期
               if 'OS/2' in out_font:
                   if "Bold" in filename:
                       out_font['OS/2'].usWeightClass = 700
                   else:
                       out_font['OS/2'].usWeightClass = 400
                       
+              # グリフの内部データ（xMin, yMin 等の境界ボックス）を正規に自動更新させて保存
+              out_font['glyf'].recalcBBoxes(out_font)
               out_font.save(machiko_path)
               out_font.close()
 
-          print("All Machiko fonts generated successfully via Inverse Pipeline.")
+          print("All Machiko fonts generated successfully with safe composite geometry.")
 
       - name: Upload Both Artifacts
         uses: actions/upload-artifact@v4
