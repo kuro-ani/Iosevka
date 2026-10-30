@@ -54,7 +54,7 @@ jobs:
           IOSEVKA_CUSTOM_PLAN_PATH: private-build-plans.toml
         run: npm run build -- 'ttf::IosevkaCustom'
 
-      # パーツ参照を完全に実体輪郭へ分解して移植するIME豆腐対策版
+      # 正しい分解ペンを用いて、英数字を完全フラット化して移植するIME豆腐対策版
       - name: Create Machiko Font (Merge and Re-scale to 3:5)
         shell: python
         env:
@@ -65,7 +65,7 @@ jobs:
           from fontTools.ttLib import TTFont
           from fontTools.pens.transformPen import TransformPen
           from fontTools.pens.ttGlyphPen import TTGlyphPen
-          from fontTools.pens.decomposingPen import DecomposingPen
+          from fontTools.pens.recordingPen import DecomposingRecordingPen
 
           ja_font_path = "ZenMaruGothic-Light.ttf"
           if not os.path.exists(ja_font_path):
@@ -78,7 +78,7 @@ jobs:
           os.makedirs("dist_machiko", exist_ok=True)
 
           # --- 基準値の取得 ---
-          sample_font = TTFont(built_files[0])
+          sample_font = TTFont(built_files)
           base_upem = sample_font['head'].unitsPerEm
           iosevka_half_width, _ = sample_font['hmtx'].metrics.get('A', (500, 0))
           target_ja_width = int(iosevka_half_width * 5 / 3)
@@ -92,7 +92,7 @@ jobs:
                   continue
               filename = os.path.basename(ttf_path)
               machiko_path = os.path.join("dist_machiko", filename.replace("IosevkaCustom", "Machiko"))
-              print(f"Generating Machiko via Decomposing Pipeline: {machiko_path}")
+              print(f"Generating Machiko via True Decomposing Pipeline: {machiko_path}")
               
               # 日本語フォント（Zen丸ゴシック）を「土台」にする
               out_font = TTFont(ja_font_path)
@@ -109,7 +109,7 @@ jobs:
               
               em_scale = out_upem / base_upem
               
-              # ステップ1: コンポーネントを一切壊さずに、日本語グリフデータのみを直接座標変換
+              # ステップ1: コンポーネントを壊さずに日本語グリフデータのみを直接座標変換
               print("Transforming core Japanese glyphs via direct coordinate math...")
               for code, g_name in list(out_cmap.items()):
                   if code < 0x7F:
@@ -125,7 +125,7 @@ jobs:
                   orig_content_width = orig_x_max - orig_x_min
                   
                   if orig_content_width <= 0:
-                      orig_content_width = out_hmtx[g_name][0]
+                      orig_content_width = out_hmtx[g_name]
                       orig_x_min = 0
                       
                   ideal_content_width = target_ja_width * GLYPH_SHRINK_RATIO
@@ -145,7 +145,7 @@ jobs:
                   
                   out_hmtx[g_name] = (target_ja_width, int(target_lsb))
                   
-              # ステップ2: Iosevkaの英数字グリフ（半角領域）を分解実体化して精密移植
+              # ステップ2: Iosevkaの英数字グリフを完全にフラット化（分解）して移植
               print("Injecting Decomposed Iosevka Latin glyphs...")
               out_glyph_set = out_font.getGlyphSet()
               
@@ -158,12 +158,14 @@ jobs:
                           
                       v_width, v_lsb = v_hmtx[v_g_name]
                       
-                      # 【最重要】DecomposingPen を噛ませて、Iosevkaの外部パーツ依存構造をここで完全にフラットな輪郭データへと分解消去する
+                      # 1. DecomposingRecordingPen でIosevkaの複合グリフ構造を完全に解決（フラット化）
+                      rec_pen = DecomposingRecordingPen(v_glyph_set)
+                      v_glyph_set[v_g_name].draw(rec_pen)
+                      
+                      # 2. アフィン変換を適用しながら、土台（Zen丸）の正規のPenへ流し込む
                       t_pen = TTGlyphPen(out_glyph_set)
                       trans_pen = TransformPen(t_pen, (em_scale, 0.0, 0.0, em_scale, 0.0, 0.0))
-                      decomp_pen = DecomposingPen(trans_pen, glyphSet=v_glyph_set)
-                      
-                      v_glyph_set[v_g_name].draw(decomp_pen)
+                      rec_pen.replay(trans_pen)
                       
                       out_glyf[ja_g_name] = t_pen.glyph()
                       out_hmtx[ja_g_name] = (int(v_width * em_scale), int(v_lsb * em_scale))
