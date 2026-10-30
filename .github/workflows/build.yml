@@ -77,8 +77,8 @@ jobs:
 
           os.makedirs("dist_machiko", exist_ok=True)
 
-          # --- 基準値の取得 ---
-          sample_font = TTFont(built_files)
+          # --- 基準値の取得（リストの最初の要素を参照するように確実に修正） ---
+          sample_font = TTFont(built_files[0])
           base_upem = sample_font['head'].unitsPerEm
           iosevka_half_width, _ = sample_font['hmtx'].metrics.get('A', (500, 0))
           target_ja_width = int(iosevka_half_width * 5 / 3)
