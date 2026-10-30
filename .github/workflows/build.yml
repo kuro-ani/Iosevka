@@ -54,7 +54,7 @@ jobs:
           IOSEVKA_CUSTOM_PLAN_PATH: private-build-plans.toml
         run: npm run build -- 'ttf::IosevkaCustom'
 
-      # 正しい分解ペンを用いて、英数字を完全フラット化して移植するIME豆腐対策版
+      # 不整合を排除する安全な制御文字フィルタリング版マージ処理
       - name: Create Machiko Font (Merge and Re-scale to 3:5)
         shell: python
         env:
@@ -125,7 +125,7 @@ jobs:
                   orig_content_width = orig_x_max - orig_x_min
                   
                   if orig_content_width <= 0:
-                      orig_content_width = out_hmtx[g_name]
+                      orig_content_width = out_hmtx[g_name][0]
                       orig_x_min = 0
                       
                   ideal_content_width = target_ja_width * GLYPH_SHRINK_RATIO
@@ -137,7 +137,6 @@ jobs:
                       for comp in orig_glyph.components:
                           comp.x = int(comp.x * scale_x + offset_x)
                   else:
-                      # --- 【最重要】型を壊さないインデックス直接上書き上書き ---
                       for i in range(len(orig_glyph.coordinates)):
                           x, y = orig_glyph.coordinates[i]
                           new_x = int(x * scale_x + offset_x)
@@ -145,12 +144,13 @@ jobs:
                   
                   out_hmtx[g_name] = (target_ja_width, int(target_lsb))
                   
-              # ステップ2: Iosevkaの英数字グリフを完全にフラット化（分解）して移植
+              # ステップ2: Iosevkaの印刷可能文字グリフ（0x0020 - 0x245F）を完全にフラット化して移植
               print("Injecting Decomposed Iosevka Latin glyphs...")
               out_glyph_set = out_font.getGlyphSet()
               
               for code, v_g_name in v_cmap.items():
-                  if code < 0x2460:
+                  # 0x0020 (スペース) 以降、かつ 0x2460 未満の印刷可能領域のみに限定（制御文字を完全に排除）
+                  if 0x0020 <= code < 0x2460:
                       ja_g_name = out_cmap.get(code)
                       if not ja_g_name:
                           ja_g_name = v_g_name
@@ -158,11 +158,9 @@ jobs:
                           
                       v_width, v_lsb = v_hmtx[v_g_name]
                       
-                      # 1. DecomposingRecordingPen でIosevkaの複合グリフ構造を完全に解決（フラット化）
                       rec_pen = DecomposingRecordingPen(v_glyph_set)
                       v_glyph_set[v_g_name].draw(rec_pen)
                       
-                      # 2. アフィン変換を適用しながら、土台（Zen丸）の正規のPenへ流し込む
                       t_pen = TTGlyphPen(out_glyph_set)
                       trans_pen = TransformPen(t_pen, (em_scale, 0.0, 0.0, em_scale, 0.0, 0.0))
                       rec_pen.replay(trans_pen)
@@ -179,7 +177,7 @@ jobs:
                       text = name_record.toUnicode()
                       text = text.replace("Zen Maru Gothic", "Machiko").replace("ZenMaruGothic", "Machiko")
                       text = text.replace("Light", filename.replace("IosevkaCustom-", "").replace(".ttf", ""))
-                      name_record.string = text.encode('utf-16-be')
+                      name_record.string = text.encode('utf-8-be')
                       
               if 'OS/2' in out_font:
                   if "Bold" in filename:
