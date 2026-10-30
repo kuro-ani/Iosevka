@@ -125,7 +125,7 @@ jobs:
                   orig_content_width = orig_x_max - orig_x_min
                   
                   if orig_content_width <= 0:
-                      orig_content_width = out_hmtx[g_name][0]
+                      orig_content_width = out_hmtx[g_name]
                       orig_x_min = 0
                       
                   ideal_content_width = target_ja_width * GLYPH_SHRINK_RATIO
@@ -149,7 +149,6 @@ jobs:
               out_glyph_set = out_font.getGlyphSet()
               
               for code, v_g_name in v_cmap.items():
-                  # 0x0020 (スペース) 以降、かつ 0x2460 未満の印刷可能領域のみに限定（制御文字を完全に排除）
                   if 0x0020 <= code < 0x2460:
                       ja_g_name = out_cmap.get(code)
                       if not ja_g_name:
@@ -177,7 +176,8 @@ jobs:
                       text = name_record.toUnicode()
                       text = text.replace("Zen Maru Gothic", "Machiko").replace("ZenMaruGothic", "Machiko")
                       text = text.replace("Light", filename.replace("IosevkaCustom-", "").replace(".ttf", ""))
-                      name_record.string = text.encode('utf-8-be')
+                      # 正しい UTF-16 BE に修正
+                      name_record.string = text.encode('utf-16-be')
                       
               if 'OS/2' in out_font:
                   if "Bold" in filename:
