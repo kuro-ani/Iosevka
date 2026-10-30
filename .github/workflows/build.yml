@@ -33,7 +33,7 @@ jobs:
           echo "$(pwd)/node_modules/.bin" >> $GITHUB_PATH
           pip install fonttools
 
-      # --- 【超高速化】Iosevkaのビルド結果をまるごとキャッシュ ---
+      # --- 【高速化】Iosevkaのビルド結果をまるごとキャッシュ ---
       - name: Cache Iosevka Build Outputs
         id: cache-iosevka
         uses: actions/cache@v4
@@ -47,14 +47,14 @@ jobs:
           xxd -r -p zen_hex.txt > ./ZenMaruGothic-Light.ttf
           echo "Successfully restored base font from hex text safely."
 
-      # 【条件付き実行】TOMLに変更がない限り、10分以上かかるこの重いビルドは自動スキップ
+      # 【条件付き実行】TOMLに変更がない限り、前回の成果物を再利用して自動スキップ！
       - name: Build Base Font
         if: steps.cache-iosevka.outputs.cache-hit != 'true'
         env:
           IOSEVKA_CUSTOM_PLAN_PATH: private-build-plans.toml
         run: npm run build -- 'ttf::IosevkaCustom'
 
-      # 入力された数値（0.92など）を反映して、中央寄せ＆余白調整マージを毎回実行（数十秒）
+      # 入力された数値（0.92など）を反映して、中央寄せ＆余白調整マージを実行
       - name: Create Machiko Font (Merge and Re-scale to 3:5)
         shell: python
         env:
@@ -94,7 +94,6 @@ jobs:
           ja_font.close()
           del ja_font
 
-          # Actionsの画面で入力された比率を取得（デフォルトは 0.92）
           GLYPH_SHRINK_RATIO = float(os.environ.get("RATIO", 0.92))
           print(f"Applying GLYPH_SHRINK_RATIO: {GLYPH_SHRINK_RATIO}")
 
@@ -157,10 +156,10 @@ jobs:
                       text = text.replace("Iosevka Custom", "Machiko").replace("IosevkaCustom", "Machiko")
                       name_record.string = text.encode('utf-16-be')
                       
-              if 'OS/2' in base_font:
-                  base_font['OS/2'].recalcXYZ(base_font)
-              if 'hhea' in base_font:
-                  base_font['hhea'].recalcXYZ(base_font)
+              # 安全な統計値（バウンディングボックス）再計算処理への置き換え
+              if 'glyf' in base_font:
+                  # fontTools公式の安全な再計算手法を使用
+                  base_font['glyf'].recalcBBoxes(base_font)
                   
               base_font.save(machiko_path)
               base_font.close()
