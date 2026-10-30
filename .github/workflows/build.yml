@@ -28,7 +28,9 @@ jobs:
       - name: Install Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y ttfautohint npm xxd
+          sudo apt-get install -y ttfautohint xxd
+          npm install
+          echo "$(pwd)/node_modules/.bin" >> $GITHUB_PATH
           pip install fonttools
 
       # --- 【超高速化】Iosevkaのビルド結果をまるごとキャッシュ ---
@@ -39,13 +41,13 @@ jobs:
           path: dist/
           key: iosevka-base-dist-${{ hashFiles('private-build-plans.toml') }}
 
-      # 毎回テキストから起こすのは一瞬（1秒未満）なので、ここは常に実行して安全を確保
+      # 16進数テキストから本物フォントを完全復元（1秒未満）
       - name: Restore Zen Maru Gothic from Local Hex Text
         run: |
           xxd -r -p zen_hex.txt > ./ZenMaruGothic-Light.ttf
           echo "Successfully restored base font from hex text safely."
 
-      # 【条件付き実行】TOMLに変更がない限り、10分以上かかるこの重いビルドは自動スキップ！
+      # 【条件付き実行】TOMLに変更がない限り、10分以上かかるこの重いビルドは自動スキップ
       - name: Build Base Font
         if: steps.cache-iosevka.outputs.cache-hit != 'true'
         env:
