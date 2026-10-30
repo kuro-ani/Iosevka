@@ -76,8 +76,8 @@ jobs:
 
           os.makedirs("dist_machiko", exist_ok=True)
 
-          # --- 基準値の取得 ---
-          sample_font = TTFont(built_files)
+          # --- 基準値の取得（built_filesの最初の要素を参照するように修正） ---
+          sample_font = TTFont(built_files[0])
           base_upem = sample_font['head'].unitsPerEm
           iosevka_half_width, _ = sample_font['hmtx'].metrics.get('A', (500, 0))
           target_ja_width = int(iosevka_half_width * 5 / 3)
@@ -126,7 +126,7 @@ jobs:
                   orig_content_width = orig_x_max - orig_x_min
                   
                   if orig_content_width <= 0:
-                      orig_content_width = out_hmtx[g_name][0]
+                      orig_content_width = out_hmtx[g_name]
                       orig_x_min = 0
                       
                   # 0.92などの比率に基づくターゲットの実体幅と左サイドベアリングの計算
