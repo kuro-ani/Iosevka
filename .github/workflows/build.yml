@@ -54,7 +54,7 @@ jobs:
           IOSEVKA_CUSTOM_PLAN_PATH: private-build-plans.toml
         run: npm run build -- 'ttf::IosevkaCustom'
 
-      # 完全クレンジング型・IME候補窓豆腐絶対修正版マージ処理
+      # 3:5長体の等幅ピッチをIME候補窓で強制維持させるマージ処理
       - name: Create Machiko Font (Merge and Re-scale to 3:5)
         shell: python
         env:
@@ -78,8 +78,8 @@ jobs:
 
           os.makedirs("dist_machiko", exist_ok=True)
 
-          # --- 基準値の取得（リストの最初の要素を参照するように確実に修正） ---
-          sample_font = TTFont(built_files[0])
+          # --- 基準値の取得 ---
+          sample_font = TTFont(built_files)
           base_upem = sample_font['head'].unitsPerEm
           iosevka_half_width, _ = sample_font['hmtx'].metrics.get('A', (500, 0))
           target_ja_width = int(iosevka_half_width * 5 / 3)
@@ -169,7 +169,7 @@ jobs:
                       
               v_font.close()
               
-              # ステップ3: 【IME候補窓絶対修正】nameテーブルを完全にクレンジングして再構築
+              # ステップ3: nameテーブルをクレンジングして再構築
               is_bold = "Bold" in filename
               style_str = "Bold" if is_bold else "Regular"
               full_name = f"Machiko {style_str}"
@@ -204,16 +204,21 @@ jobs:
                   out_font['OS/2'].usWeightClass = 700 if is_bold else 400
                   out_font['OS/2'].ulCodePageRange1 |= 0x00020001 # CP932(日本語) ＆ CP1252(ラテン)
                   out_font['OS/2'].ulUnicodeRange1 |= 0x50000000  # CJK 統合漢字 ＆ かな
-                  # Panoseデータを等幅テキスト（Monospace）としてGDIに完全認識させる
+                  
+                  # --- 【1:2引き伸ばしバグの修正】 ---
                   if hasattr(out_font['OS/2'], 'panose'):
                       out_font['OS/2'].panose.bFamilyType = 2 # Text and Display
                       out_font['OS/2'].panose.bSerifStyle = 11 # Normal Sans
-                      out_font['OS/2'].panose.bProportion = 9  # Monospaced
-                      
+                      out_font['OS/2'].panose.bProportion = 3  # Modern (1:2制限を回避し、独自の3:5ピッチを有効化する設定)
+
+              # postテーブルで固定ピッチフォントであることを明示
+              if 'post' in out_font:
+                  out_font['post'].isFixedPitch = 1
+
               out_font.save(machiko_path)
               out_font.close()
 
-          print("All Machiko fonts generated successfully with safe flat-decomposed geometry.")
+          print("All Machiko fonts generated successfully with safe 3:5 modern geometry.")
 
       - name: Upload Both Artifacts
         uses: actions/upload-artifact@v4
