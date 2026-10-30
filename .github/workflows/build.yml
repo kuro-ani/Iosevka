@@ -137,11 +137,11 @@ jobs:
                       for comp in orig_glyph.components:
                           comp.x = int(comp.x * scale_x + offset_x)
                   else:
-                      transformed_coords = []
-                      for x, y in orig_glyph.coordinates:
+                      # --- 【最重要】型を壊さないインデックス直接上書き上書き ---
+                      for i in range(len(orig_glyph.coordinates)):
+                          x, y = orig_glyph.coordinates[i]
                           new_x = int(x * scale_x + offset_x)
-                          transformed_coords.append((new_x, y))
-                      orig_glyph.coordinates = transformed_coords
+                          orig_glyph.coordinates[i] = (new_x, y)
                   
                   out_hmtx[g_name] = (target_ja_width, int(target_lsb))
                   
@@ -187,7 +187,6 @@ jobs:
                   else:
                       out_font['OS/2'].usWeightClass = 400
                       
-              # エラーの原因となった不正な行を完全に削除
               out_font.save(machiko_path)
               out_font.close()
 
