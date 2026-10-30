@@ -78,8 +78,8 @@ jobs:
 
           os.makedirs("dist_machiko", exist_ok=True)
 
-          # --- 基準値の取得 ---
-          sample_font = TTFont(built_files)
+          # --- 基準値の取得（リストの最初の要素を参照するように確実に修正） ---
+          sample_font = TTFont(built_files[0])
           base_upem = sample_font['head'].unitsPerEm
           iosevka_half_width, _ = sample_font['hmtx'].metrics.get('A', (500, 0))
           target_ja_width = int(iosevka_half_width * 5 / 3)
@@ -169,17 +169,14 @@ jobs:
                       
               v_font.close()
               
-              # ステップ3: 【IME候補窓絶対修正】nameテーブルを完全にクレンジングして、完全なる新規Regular/Boldとして再構築する
+              # ステップ3: 【IME候補窓絶対修正】nameテーブルを完全にクレンジングして再構築
               is_bold = "Bold" in filename
               style_str = "Bold" if is_bold else "Regular"
               full_name = f"Machiko {style_str}"
               postscript_name = f"Machiko-{style_str}"
               
-              # 既存のnameレコードを全消去してクリーンアップ
               out_font['name'].names = []
               
-              # Windows用の厳格な名名前定義レコード群 (PlatformID=3, EncodingID=1, LanguageID=0x0409 [英語])
-              # および日本語環境用 (PlatformID=3, EncodingID=1, LanguageID=0x0411 [日本語]) を安全生成
               name_configs = [
                   (0x0409, "Machiko", style_str, full_name, postscript_name),
                   (0x0411, "Machiko", style_str, full_name, postscript_name)
@@ -188,7 +185,7 @@ jobs:
               for lang_id, fam, styl, f_nm, ps_nm in name_configs:
                   name_data = {
                       1: fam,             # Font Family Name
-                      2: styl,            # Font Subfamily Name (ここが Regular or Bold に完全固定される)
+                      2: styl,            # Font Subfamily Name
                       3: f"1.000;UKWN;{ps_nm}", # Unique Font ID
                       4: f_nm,            # Full Font Name
                       6: ps_nm,           # PostScript Name
@@ -211,8 +208,8 @@ jobs:
                   if hasattr(out_font['OS/2'], 'panose'):
                       out_font['OS/2'].panose.bFamilyType = 2 # Text and Display
                       out_font['OS/2'].panose.bSerifStyle = 11 # Normal Sans
-                      out_font['OS/2'].panose.bProportion = 9  # Monospaced (ここが最重要)
-
+                      out_font['OS/2'].panose.bProportion = 9  # Monospaced
+                      
               out_font.save(machiko_path)
               out_font.close()
 
