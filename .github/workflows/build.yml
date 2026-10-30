@@ -54,7 +54,7 @@ jobs:
           IOSEVKA_CUSTOM_PLAN_PATH: private-build-plans.toml
         run: npm run build -- 'ttf::IosevkaCustom'
 
-      # 不整合を完全に排除するASCII領域限定移植版マージ処理
+      # 不整合を完全に排除するASCII領域限定 ＆ OS/2日本語フラグ強制書き込み版マージ処理
       - name: Create Machiko Font (Merge and Re-scale to 3:5)
         shell: python
         env:
@@ -77,7 +77,7 @@ jobs:
 
           os.makedirs("dist_machiko", exist_ok=True)
 
-          # --- 基準値 of 第一成果物 の取得 ---
+          # --- 基準値の取得 ---
           sample_font = TTFont(built_files[0])
           base_upem = sample_font['head'].unitsPerEm
           iosevka_half_width, _ = sample_font['hmtx'].metrics.get('A', (500, 0))
@@ -144,12 +144,11 @@ jobs:
                   
                   out_hmtx[g_name] = (target_ja_width, int(target_lsb))
                   
-              # ステップ2: Iosevkaの半角英数字（ASCII 0x0020 - 0x007E）のみを完全フラット化して精密移植
+              # ステップ2: Iosevkaの半角英数字（ASCII 0x0020 - 0x007E）のみ精密移植
               print("Injecting Decomposed Iosevka Latin glyphs...")
               out_glyph_set = out_font.getGlyphSet()
               
               for code, v_g_name in v_cmap.items():
-                  # 土台側にも100%定義が存在する半角ASCII印字可能領域のみに制限
                   if 0x0020 <= code <= 0x007E:
                       ja_g_name = out_cmap.get(code)
                       if not ja_g_name:
@@ -183,6 +182,12 @@ jobs:
                       out_font['OS/2'].usWeightClass = 700
                   else:
                       out_font['OS/2'].usWeightClass = 400
+                  
+                  # --- 【IME最終対策】GDI/IMEエンジンに日本語フォントだと100%認識させるフラグ強制セット ---
+                  # ulCodePageRange1 の ビット0(CP1252:ラテン) と ビット17(CP932:日本語) を強制オンにする (0x00020001)
+                  out_font['OS/2'].ulCodePageRange1 |= 0x00020001
+                  # UnicodeRange の 日本語領域（ひらがな/カタカナ/漢字）のフラグビットを安全に維持・補強
+                  out_font['OS/2'].ulUnicodeRange1 |= 0x50000000  # CJK 統合漢字 / ひらがな・カタカナのビット
                       
               out_font.save(machiko_path)
               out_font.close()
