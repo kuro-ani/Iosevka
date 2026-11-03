@@ -2,10 +2,14 @@ name: Build Custom Iosevka and Tune Machiko
 on:
   workflow_dispatch:
     inputs:
-      shrink_ratio:
-        description: "Glyph Shrink Ratio (e.g., 0.92)"
+       mono_shrink_ratio:
+        description: "Mono: Japanese Glyph Shrink Ratio (e.g., 0.92)"
         required: true
         default: "0.92"
+       prop_scale_x_ratio:
+         description: "Prop: Japanese Scale X Ratio (e.g., 0.80)"
+         required: true
+         default: "0.80"
 
 jobs:
   build:
@@ -39,7 +43,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: dist/
-          key: iosevka-base-dist-${{ hashFiles('private-build-plans.toml') }}
+          key: iosevka-base-dist-v3-${{ hashFiles('private-build-plans.toml', 'private-build-plans-prop.toml') }}
 
       # 16進数テキストから本物フォントを完全復元
       - name: Restore Zen Maru Gothic from Local Hex Text
@@ -47,18 +51,21 @@ jobs:
           xxd -r -p zen_hex.txt > ./ZenMaruGothic-Light.ttf
           echo "Successfully restored base font from hex text safely."
 
-      # 【条件付き実行】TOMLに変更がない限り自動スキップ
+      # 【条件付き実行】TOMLに変更がない限り自動スキップ (MonoとPropを両方ビルド)
       - name: Build Base Font
         if: steps.cache-iosevka.outputs.cache-hit != 'true'
-        env:
-          IOSEVKA_CUSTOM_PLAN_PATH: private-build-plans.toml
-        run: npm run build -- 'ttf::IosevkaCustom'
+        run: |
+          export IOSEVKA_CUSTOM_PLAN_PATH=private-build-plans.toml
+          npm run build -- 'ttf::IosevkaCustom'
+          export IOSEVKA_CUSTOM_PLAN_PATH=private-build-plans-prop.toml
+          npm run build -- 'ttf::IosevkaProp'
 
-      # 3:5長体の等幅ピッチをIME候補窓で強制維持させるマージ処理
-      - name: Create Machiko Font (Merge and Re-scale to 3:5)
+      # 等幅(Mono)・可変(Prop)の2種同時生成マージパイプライン
+      - name: Create Machiko Fonts (Merge and Process Mono/Prop)
         shell: python
         env:
-          RATIO: ${{ github.event.inputs.shrink_ratio }}
+          MONO_RATIO: ${{ github.event.inputs.mono_shrink_ratio }}
+          PROP_RATIO: ${{ github.event.inputs.prop_scale_x_ratio }}
         run: |
           import os
           import glob
@@ -85,16 +92,27 @@ jobs:
           target_ja_width = int(iosevka_half_width * 5 / 3)
           sample_font.close()
 
-          GLYPH_SHRINK_RATIO = float(os.environ.get("RATIO", 0.92))
-          print(f"Applying GLYPH_SHRINK_RATIO: {GLYPH_SHRINK_RATIO}")
+          MONO_SHRINK_RATIO = float(os.environ.get("MONO_RATIO", 0.92))
+          PROP_SCALE_X_RATIO = float(os.environ.get("PROP_RATIO", 0.80))          GLYPH_SHRINK_RATIO = float(os.environ.get("RATIO", 0.92))
 
           for ttf_path in built_files:
               if "node_modules" in ttf_path:
                   continue
               filename = os.path.basename(ttf_path)
-              machiko_path = os.path.join("dist_machiko", filename.replace("IosevkaCustom", "Machiko"))
-              print(f"Generating Machiko via True Decomposing Pipeline: {machiko_path}")
-              
+                # ファイル名からMono/Propのモード判定
+              if "IosevkaCustom" in filename:
+                  mode = {"suffix": "Mono", "is_mono": True, "ratio": MONO_SHRINK_RATIO}
+                  base_key = "IosevkaCustom"
+              elif "IosevkaProp" in filename:
+                  mode = {"suffix": "Prop", "is_mono": False, "ratio": PROP_SCALE_X_RATIO}
+                  base_key = "IosevkaProp"
+              else:
+                  continue
+
+              brand_family = f"Machiko{mode['suffix']}"
+              machiko_path = os.path.join("dist_machiko", filename.replace(base_key, brand_family))
+              print(f"Generating {brand_family} via True Decomposing Pipeline: {machiko_path}")
+            
               # 日本語フォント（Zen丸ゴシック）を「土台」にする
               out_font = TTFont(ja_font_path)
               out_cmap = out_font['cmap'].getBestCmap()
@@ -110,15 +128,18 @@ jobs:
               
               em_scale = out_upem / base_upem
               
-              # ステップ1: コンポーネントを壊さずに日本語グリフデータのみを直接座標変換
-              print("Transforming core Japanese glyphs via direct coordinate math...")
-              for code, g_name in list(out_cmap.items()):
+             # ステップ1: 日本語グリフデータのみを直接座標変換 (Mono/Prop可変対応)
+             print(f"Transforming core Japanese glyphs (Mode: {mode['suffix']}, Ratio: {mode['ratio']})...")
+             for code, g_name in list(out_cmap.items()):
                   if code < 0x7F:
                       continue
                       
                   orig_glyph = out_glyf[g_name]
+                  orig_width, _ = out_hmtx[g_name]
+                  
                   if orig_glyph.numberOfContours == 0:
-                      out_hmtx[g_name] = (target_ja_width, 0)
+                     out_hmtx[g_name] = (target_ja_width if mode['is_mono'] else int(orig_width * mode['ratio']), 0)
+                      
                       continue
                   
                   orig_x_min = orig_glyph.xMin
@@ -126,12 +147,20 @@ jobs:
                   orig_content_width = orig_x_max - orig_x_min
                   
                   if orig_content_width <= 0:
-                      orig_content_width = out_hmtx[g_name]
+                      orig_content_width = orig_width
                       orig_x_min = 0
                       
-                  ideal_content_width = target_ja_width * GLYPH_SHRINK_RATIO
-                  scale_x = ideal_content_width / orig_content_width
-                  target_lsb = (target_ja_width - ideal_content_width) / 2
+                  if mode['is_mono']:
+                      ideal_content_width = target_ja_width * mode['ratio']
+                      scale_x = ideal_content_width / orig_content_width
+                      calc_width = target_ja_width
+                  else:
+                      scale_x = mode['ratio']
+                      ideal_content_width = orig_content_width * mode['ratio']
+                      calc_width = int(orig_width * mode['ratio'])
+                      
+                  target_lsb = (calc_width - ideal_content_width) / 2
+   
                   offset_x = target_lsb - (orig_x_min * scale_x)
                   
                   if orig_glyph.isComposite():
@@ -143,7 +172,7 @@ jobs:
                           new_x = int(x * scale_x + offset_x)
                           orig_glyph.coordinates[i] = (new_x, y)
                   
-                  out_hmtx[g_name] = (target_ja_width, int(target_lsb))
+                 out_hmtx[g_name] = (calc_width, int(target_lsb))
                   
               # ステップ2: Iosevkaの半角英数字（ASCII 0x0020 - 0x007E）のみ精密移植
               print("Injecting Decomposed Iosevka Latin glyphs...")
@@ -169,26 +198,26 @@ jobs:
                       
               v_font.close()
               
-              # ステップ3: nameテーブルをクレンジングして再構築
+              # ステップ3: nameテーブルをクレンジングして再構築 (Mono/Prop名に対応)
               is_bold = "Bold" in filename
               style_str = "Bold" if is_bold else "Regular"
-              full_name = f"Machiko {style_str}"
-              postscript_name = f"Machiko-{style_str}"
+              full_name = f"{brand_family} {style_str}"
+              postscript_name = f"{brand_family}-{style_str}"
               
               out_font['name'].names = []
               
               name_configs = [
-                  (0x0409, "Machiko", style_str, full_name, postscript_name),
-                  (0x0411, "Machiko", style_str, full_name, postscript_name)
+                  (0x0409, brand_family, style_str, full_name, postscript_name),
+                  (0x0411, brand_family, style_str, full_name, postscript_name)
               ]
               
               for lang_id, fam, styl, f_nm, ps_nm in name_configs:
                   name_data = {
-                      1: fam,             # Font Family Name
-                      2: styl,            # Font Subfamily Name
+                      1: fam,                   # Font Family Name
+                      2: styl,                  # Font Subfamily Name
                       3: f"1.000;UKWN;{ps_nm}", # Unique Font ID
-                      4: f_nm,            # Full Font Name
-                      6: ps_nm,           # PostScript Name
+                      4: f_nm,                  # Full Font Name
+                      6: ps_nm,                 # PostScript Name
                   }
                   for name_id, text_val in name_data.items():
                       nr = NameRecord()
@@ -198,8 +227,8 @@ jobs:
                       nr.nameID = name_id
                       nr.string = text_val.encode('utf-16-be')
                       out_font['name'].names.append(nr)
-                      
-              # メタデータおよびビットフラグの強制同期
+
+              # ステップ4: メタデータ・ビットフラグ・GDI/IMEバグの完全回避強制書き換え
               if 'OS/2' in out_font:
                   out_font['OS/2'].usWeightClass = 700 if is_bold else 400
                   out_font['OS/2'].ulCodePageRange1 |= 0x00020001 # CP932(日本語) ＆ CP1252(ラテン)
@@ -208,20 +237,22 @@ jobs:
                   if hasattr(out_font['OS/2'], 'panose'):
                       out_font['OS/2'].panose.bFamilyType = 2 
                       out_font['OS/2'].panose.bSerifStyle = 11 
-                      out_font['OS/2'].panose.bProportion = 3  # Modern
+                      out_font['OS/2'].panose.bProportion = 3 if mode['is_mono'] else 0  # MonoのみModern等幅を指定
 
               if 'post' in out_font:
-                  out_font['post'].isFixedPitch = 1
+                  out_font['post'].isFixedPitch = 1 if mode['is_mono'] else 0
 
-              # --- 【IMEピッチ1:2強制化の完全解除】 ---
-              # hheaテーブルの最大文字幅を、今回のターゲット3:5幅（target_ja_width）へ精密に強制上書きする
-              if 'hhea' in out_font:
+              # --- 【IMEピッチ1:2強制化の完全解除 (Monoのみ適用)】 ---
+              # hheaテーブルの最大文字幅を、等幅版のターゲット3:5幅（target_ja_width）へ精密に強制上書きする
+              if mode['is_mono'] and 'hhea' in out_font:
                   out_font['hhea'].advanceWidthMax = int(target_ja_width)
-
+                      
+              # 保存
               out_font.save(machiko_path)
               out_font.close()
+              print(f"Successfully generated: {machiko_path}")
 
-          print("All Machiko fonts generated successfully with safe 3:5 modern geometry.")
+          print("All Machiko fonts generated successfully with safe modern geometry.")
 
       - name: Upload Both Artifacts
         uses: actions/upload-artifact@v4
@@ -231,3 +262,4 @@ jobs:
             dist/**/*.ttf
             dist_machiko/*.ttf
           if-no-files-found: error
+
