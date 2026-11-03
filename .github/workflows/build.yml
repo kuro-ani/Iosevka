@@ -99,7 +99,8 @@ jobs:
           sample_font.close()
 
           MONO_SHRINK_RATIO = float(os.environ.get("MONO_RATIO", 0.92))
-          PROP_SCALE_X_RATIO = float(os.environ.get("PROP_RATIO", 0.80))          GLYPH_SHRINK_RATIO = float(os.environ.get("RATIO", 0.92))
+          PROP_SCALE_X_RATIO = float(os.environ.get("PROP_RATIO", 0.80)) 
+          GLYPH_SHRINK_RATIO = float(os.environ.get("RATIO", 0.92))
 
           for ttf_path in built_files:
               if "node_modules" in ttf_path:
