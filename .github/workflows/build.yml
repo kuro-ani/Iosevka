@@ -38,7 +38,7 @@ jobs:
           cp private-build-plans.toml private-build-plans.toml.bak
           npm run build -- 'ttf::IosevkaCustom'
           cp private-private-build-plans-prop.toml private-build-plans.toml
-          npm run build -- 'ttf::IosevkaRoc'
+          npm run build -- 'ttf::IosevkaProp'
           mv private-build-plans.toml.bak private-build-plans.toml
       - name: Create Machiko Fonts
         shell: python
@@ -68,7 +68,7 @@ jobs:
               if "node_modules" in ttf_path: continue
               filename = os.path.basename(ttf_path)
               if "IosevkaCustom" in filename: base_key, brand_prefix = "IosevkaCustom", "Machiko"
-              elif "IosevkaRoc" in filename: base_key, brand_prefix = "IosevkaRoc", "MachikoROC"
+              elif "IosevkaProp" in filename: base_key, brand_prefix = "IosevkaProp", "MachikoPROP"
               else: continue
               is_bold = "Bold" in filename
               style_str = "Bold" if is_bold else "Regular"
