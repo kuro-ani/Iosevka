@@ -31,7 +31,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: dist/
-          key: iosevka-v8-${{ hashFiles('private-build-plans.toml') }}
+          key: iosevka-v9-${{ hashFiles('private-build-plans.toml') }}
       - run: xxd -r -p zen_hex.txt > ./ZenMaruGothic-Light.ttf
       - if: steps.cache-iosevka.outputs.cache-hit != 'true'
         env:
@@ -53,7 +53,7 @@ jobs:
           ja_font_path = "ZenMaruGothic-Light.ttf"
           built_files = glob.glob("dist/**/*.ttf", recursive=True)
           os.makedirs("dist_machiko", exist_ok=True)
-          sample_font = TTFont(built_files[0])
+          sample_font = TTFont(built_files)
           base_upem = sample_font['head'].unitsPerEm
           iosevka_half_width, _ = sample_font['hmtx'].metrics.get('A', (500, 0))
           target_ja_width = int(iosevka_half_width * 5 / 3)
@@ -93,10 +93,8 @@ jobs:
                       trans_pen = TransformPen(t_pen, (em_scale, 0.0, 0.0, em_scale, 0.0, 0.0))
                       rec_pen.replay(trans_pen)
                       out_glyf[j_g_name] = t_pen.glyph()
-                      
                       for table in out_font['cmap'].tables:
                           table.cmap[code] = j_g_name
-                          
                       orig_glyph = out_glyf[j_g_name]
                       if orig_glyph.numberOfContours == 0 or not hasattr(orig_glyph, 'xMin'):
                           out_hmtx[j_g_name] = (target_ja_width if is_mono else int(v_width * em_scale * current_ratio), 0)
@@ -146,17 +144,26 @@ jobs:
                   full_name = f"{brand_family} {style_str}"
                   postscript_name = f"{brand_family}-{style_str}"
                   out_font['name'].names = []
-                  name_configs = [
-                      (0x0409, brand_family, style_str, full_name, postscript_name),
-                      (0x0411, brand_family, style_str, full_name, postscript_name)
-                  ]
-                  for lang_id, fam, styl, f_nm, ps_nm in name_configs:
-                      name_data = {1: fam, 2: styl, 3: f"1.000;UKWN;{ps_nm}", 4: f_nm, 6: ps_nm}
-                      for name_id, text_val in name_data.items():
-                          nr = NameRecord()
-                          nr.platformID, nr.platEncID, nr.langID, nr.nameID = 3, 1, lang_id, name_id
-                          nr.string = text_val.encode('utf-16-be')
-                          out_font['name'].names.append(nr)
+                  name_data = {
+                      1: brand_family,
+                      2: style_str,
+                      3: f"1.000;UKWN;{postscript_name}",
+                      4: full_name,
+                      6: postscript_name
+                  }
+                  for nid, text_val in name_data.items():
+                      nr_win_ja = NameRecord()
+                      nr_win_ja.platformID, nr_win_ja.platEncID, nr_win_ja.langID, nr_win_ja.nameID = 3, 1, 0x0411, nid
+                      nr_win_ja.string = text_val.encode('utf-16-be')
+                      out_font['name'].names.append(nr_win_ja)
+                      nr_win_en = NameRecord()
+                      nr_win_en.platformID, nr_win_en.platEncID, nr_win_en.langID, nr_win_en.nameID = 3, 1, 0x0409, nid
+                      nr_win_en.string = text_val.encode('utf-16-be')
+                      out_font['name'].names.append(nr_win_en)
+                      nr_mac = NameRecord()
+                      nr_mac.platformID, nr_mac.platEncID, nr_mac.langID, nr_mac.nameID = 1, 0, 0, nid
+                      nr_mac.string = text_val.encode('ascii', 'ignore')
+                      out_font['name'].names.append(nr_mac)
                   if 'OS/2' in out_font:
                       out_font['OS/2'].usWeightClass = 700 if is_bold else 400
                       out_font['OS/2'].ulCodePageRange1 |= 0x00020001
@@ -172,6 +179,7 @@ jobs:
                   out_font.save(machiko_path)
                   out_font.close()
                   print(f"Generated: {machiko_path}")
+      
       - name: Upload Both Artifacts
         uses: actions/upload-artifact@v4
         with:
