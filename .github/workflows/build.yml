@@ -31,7 +31,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: dist/
-          key: iosevka-v6-${{ hashFiles('private-build-plans.toml') }}
+          key: iosevka-v7-${{ hashFiles('private-build-plans.toml') }}
       - run: xxd -r -p zen_hex.txt > ./ZenMaruGothic-Light.ttf
       - if: steps.cache-iosevka.outputs.cache-hit != 'true'
         env:
@@ -53,6 +53,11 @@ jobs:
           ja_font_path = "ZenMaruGothic-Light.ttf"
           built_files = glob.glob("dist/**/*.ttf", recursive=True)
           os.makedirs("dist_machiko", exist_ok=True)
+          sample_font = TTFont(built_files[0])
+          base_upem = sample_font['head'].unitsPerEm
+          iosevka_half_width, _ = sample_font['hmtx'].metrics.get('A', (500, 0))
+          target_ja_width = int(iosevka_half_width * 5 / 3)
+          sample_font.close()
           MONO_SHRINK_RATIO = float(os.environ.get("MONO_RATIO", 0.92))
           PROP_SCALE_X_RATIO = float(os.environ.get("PROP_RATIO", 0.80))
           LATIN_PADDING_EM = int(os.environ.get("LATIN_PADDING", 60))
@@ -77,8 +82,6 @@ jobs:
                   ja_glyph_set = ja_font.getGlyphSet()
                   ja_upem = ja_font['head'].unitsPerEm
                   em_scale = out_upem / ja_upem
-                  iosevka_half_width, _ = out_hmtx.get('A', (500, 0))
-                  target_ja_width = int(iosevka_half_width * 5 / 3)
                   current_ratio = MONO_SHRINK_RATIO if is_mono else PROP_SCALE_X_RATIO
                   out_glyph_set = out_font.getGlyphSet()
                   for code, j_g_name in ja_cmap.items():
@@ -92,7 +95,7 @@ jobs:
                       out_glyf[j_g_name] = t_pen.glyph()
                       out_cmap[code] = j_g_name
                       orig_glyph = out_glyf[j_g_name]
-                      if orig_glyph.numberOfContours == 0:
+                      if orig_glyph.numberOfContours == 0 or not hasattr(orig_glyph, 'xMin'):
                           out_hmtx[j_g_name] = (target_ja_width if is_mono else int(v_width * em_scale * current_ratio), 0)
                           continue
                       orig_x_min, orig_x_max = orig_glyph.xMin, orig_glyph.xMax
