@@ -31,7 +31,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: dist/
-          key: iosevka-v7-${{ hashFiles('private-build-plans.toml') }}
+          key: iosevka-v8-${{ hashFiles('private-build-plans.toml') }}
       - run: xxd -r -p zen_hex.txt > ./ZenMaruGothic-Light.ttf
       - if: steps.cache-iosevka.outputs.cache-hit != 'true'
         env:
@@ -93,7 +93,10 @@ jobs:
                       trans_pen = TransformPen(t_pen, (em_scale, 0.0, 0.0, em_scale, 0.0, 0.0))
                       rec_pen.replay(trans_pen)
                       out_glyf[j_g_name] = t_pen.glyph()
-                      out_cmap[code] = j_g_name
+                      
+                      for table in out_font['cmap'].tables:
+                          table.cmap[code] = j_g_name
+                          
                       orig_glyph = out_glyf[j_g_name]
                       if orig_glyph.numberOfContours == 0 or not hasattr(orig_glyph, 'xMin'):
                           out_hmtx[j_g_name] = (target_ja_width if is_mono else int(v_width * em_scale * current_ratio), 0)
@@ -121,10 +124,10 @@ jobs:
                               orig_glyph.coordinates[i] = (int(x * scale_x + offset_x), y)
                       out_hmtx[j_g_name] = (calc_width, int(target_lsb))
                   if not is_mono:
-                      for code, v_g_name in list(out_cmap.items()):
+                      out_cmap_fixed = out_font['cmap'].getBestCmap()
+                      for code, v_g_name in list(out_cmap_fixed.items()):
                           if 0x0020 <= code <= 0x007E:
                               final_glyph = out_glyf[v_g_name]
-                              v_width, v_lsb = out_hmtx[v_g_name]
                               if final_glyph.numberOfContours == 0 or not hasattr(final_glyph, 'xMin'): continue
                               g_x_min, g_x_max = final_glyph.xMin, final_glyph.xMax
                               actual_char_width = g_x_max - g_x_min
