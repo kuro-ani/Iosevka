@@ -31,7 +31,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: dist/
-          key: iosevka-mono-only-v4-${{ hashFiles('private-build-plans.toml') }}
+          key: iosevka-v4-${{ hashFiles('private-build-plans.toml') }}
       - run: xxd -r -p zen_hex.txt > ./ZenMaruGothic-Light.ttf
       - if: steps.cache-iosevka.outputs.cache-hit != 'true'
         env:
@@ -53,6 +53,11 @@ jobs:
           ja_font_path = "ZenMaruGothic-Light.ttf"
           built_files = glob.glob("dist/**/*.ttf", recursive=True)
           os.makedirs("dist_machiko", exist_ok=True)
+          sample_font = TTFont(built_files[0])
+          base_upem = sample_font['head'].unitsPerEm
+          iosevka_half_width, _ = sample_font['hmtx'].metrics.get('A', (500, 0))
+          target_ja_width = int(iosevka_half_width * (1000 / base_upem) * 5 / 3)
+          sample_font.close()
           MONO_SHRINK_RATIO = float(os.environ.get("MONO_RATIO", 0.92))
           PROP_SCALE_X_RATIO = float(os.environ.get("PROP_RATIO", 0.80))
           LATIN_PADDING_EM = int(os.environ.get("LATIN_PADDING", 60))
@@ -77,8 +82,6 @@ jobs:
                   v_glyph_set = v_font.getGlyphSet()
                   base_upem = v_font['head'].unitsPerEm
                   em_scale = out_upem / base_upem
-                  iosevka_half_width, _ = v_hmtx.get('A', (500, 0))
-                  target_ja_width = int(iosevka_half_width * em_scale * 5 / 3)
                   current_ratio = MONO_SHRINK_RATIO if is_mono else PROP_SCALE_X_RATIO
                   for code, g_name in list(out_cmap.items()):
                       if code < 0x7F: continue
@@ -93,13 +96,13 @@ jobs:
                           orig_content_width = orig_width
                           orig_x_min = 0
                       if is_mono:
-                          scale_x = (target_ja_width * current_ratio) / orig_content_width
+                          ideal_content_width = target_ja_width * current_ratio
+                          scale_x = ideal_content_width / orig_content_width
                           calc_width = target_ja_width
-                          ideal_width = target_ja_width * current_ratio
                       else:
                           scale_x = current_ratio
+                          ideal_content_width = orig_content_width * current_ratio
                           calc_width = int(orig_width * current_ratio)
-                          ideal_width = orig_content_width * current_ratio
                       target_lsb = (calc_width - ideal_content_width) / 2
                       offset_x = target_lsb - (orig_x_min * scale_x)
                       if orig_glyph.isComposite():
