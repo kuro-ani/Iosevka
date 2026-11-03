@@ -31,7 +31,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: dist/
-          key: iosevka-v5-${{ hashFiles('private-build-plans.toml') }}
+          key: iosevka-v6-${{ hashFiles('private-build-plans.toml') }}
       - run: xxd -r -p zen_hex.txt > ./ZenMaruGothic-Light.ttf
       - if: steps.cache-iosevka.outputs.cache-hit != 'true'
         env:
@@ -53,11 +53,6 @@ jobs:
           ja_font_path = "ZenMaruGothic-Light.ttf"
           built_files = glob.glob("dist/**/*.ttf", recursive=True)
           os.makedirs("dist_machiko", exist_ok=True)
-          sample_font = TTFont(built_files[0])
-          base_upem = sample_font['head'].unitsPerEm
-          iosevka_half_width, _ = sample_font['hmtx'].metrics.get('A', (500, 0))
-          target_ja_width = int(iosevka_half_width * (1000 / base_upem) * 5 / 3)
-          sample_font.close()
           MONO_SHRINK_RATIO = float(os.environ.get("MONO_RATIO", 0.92))
           PROP_SCALE_X_RATIO = float(os.environ.get("PROP_RATIO", 0.80))
           LATIN_PADDING_EM = int(os.environ.get("LATIN_PADDING", 60))
@@ -71,29 +66,39 @@ jobs:
                   suffix = "Mono" if is_mono else "Prop"
                   brand_family = f"Machiko{suffix}"
                   machiko_path = os.path.join("dist_machiko", filename.replace("IosevkaCustom", brand_family))
-                  out_font = TTFont(ja_font_path)
+                  out_font = TTFont(ttf_path)
                   out_cmap = out_font['cmap'].getBestCmap()
                   out_hmtx = out_font['hmtx'].metrics
                   out_glyf = out_font['glyf']
                   out_upem = out_font['head'].unitsPerEm
-                  v_font = TTFont(ttf_path)
-                  v_cmap = v_font['cmap'].getBestCmap()
-                  v_hmtx = v_font['hmtx'].metrics
-                  v_glyph_set = v_font.getGlyphSet()
-                  base_upem = v_font['head'].unitsPerEm
-                  em_scale = out_upem / base_upem
+                  ja_font = TTFont(ja_font_path)
+                  ja_cmap = ja_font['cmap'].getBestCmap()
+                  ja_hmtx = ja_font['hmtx'].metrics
+                  ja_glyph_set = ja_font.getGlyphSet()
+                  ja_upem = ja_font['head'].unitsPerEm
+                  em_scale = out_upem / ja_upem
+                  iosevka_half_width, _ = out_hmtx.get('A', (500, 0))
+                  target_ja_width = int(iosevka_half_width * 5 / 3)
                   current_ratio = MONO_SHRINK_RATIO if is_mono else PROP_SCALE_X_RATIO
-                  for code, g_name in list(out_cmap.items()):
-                      if code < 0x7F: continue
-                      orig_glyph = out_glyf[g_name]
-                      orig_width, _ = out_hmtx[g_name]
+                  out_glyph_set = out_font.getGlyphSet()
+                  for code, j_g_name in ja_cmap.items():
+                      if code < 0x007F: continue
+                      v_width, v_lsb = ja_hmtx[j_g_name]
+                      rec_pen = DecomposingRecordingPen(ja_glyph_set)
+                      ja_glyph_set[j_g_name].draw(rec_pen)
+                      t_pen = TTGlyphPen(out_glyph_set)
+                      trans_pen = TransformPen(t_pen, (em_scale, 0.0, 0.0, em_scale, 0.0, 0.0))
+                      rec_pen.replay(trans_pen)
+                      out_glyf[j_g_name] = t_pen.glyph()
+                      out_cmap[code] = j_g_name
+                      orig_glyph = out_glyf[j_g_name]
                       if orig_glyph.numberOfContours == 0:
-                          out_hmtx[g_name] = (target_ja_width if is_mono else int(orig_width * current_ratio), 0)
+                          out_hmtx[j_g_name] = (target_ja_width if is_mono else int(v_width * em_scale * current_ratio), 0)
                           continue
                       orig_x_min, orig_x_max = orig_glyph.xMin, orig_glyph.xMax
                       orig_content_width = orig_x_max - orig_x_min
                       if orig_content_width <= 0:
-                          orig_content_width = orig_width
+                          orig_content_width = int(v_width * em_scale)
                           orig_x_min = 0
                       if is_mono:
                           ideal_content_width = target_ja_width * current_ratio
@@ -102,7 +107,7 @@ jobs:
                       else:
                           scale_x = current_ratio
                           ideal_content_width = orig_content_width * current_ratio
-                          calc_width = int(orig_width * current_ratio)
+                          calc_width = int(v_width * em_scale * current_ratio)
                       target_lsb = (calc_width - ideal_content_width) / 2
                       offset_x = target_lsb - (orig_x_min * scale_x)
                       if orig_glyph.isComposite():
@@ -111,41 +116,27 @@ jobs:
                           for i in range(len(orig_glyph.coordinates)):
                               x, y = orig_glyph.coordinates[i]
                               orig_glyph.coordinates[i] = (int(x * scale_x + offset_x), y)
-                      out_hmtx[g_name] = (calc_width, int(target_lsb))
-                  out_glyph_set = out_font.getGlyphSet()
-                  for code, v_g_name in v_cmap.items():
-                      if 0x0020 <= code <= 0x007E:
-                          ja_g_name = out_cmap.get(code)
-                          if not ja_g_name: continue
-                          v_width, v_lsb = v_hmtx[v_g_name]
-                          rec_pen = DecomposingRecordingPen(v_glyph_set)
-                          v_glyph_set[v_g_name].draw(rec_pen)
-                          t_pen = TTGlyphPen(out_glyph_set)
-                          trans_pen = TransformPen(t_pen, (em_scale, 0.0, 0.0, em_scale, 0.0, 0.0))
-                          rec_pen.replay(trans_pen)
-                          out_glyf[ja_g_name] = t_pen.glyph()
-                          final_glyph = out_glyf[ja_g_name]
-                          if is_mono or final_glyph.numberOfContours == 0 or not hasattr(final_glyph, 'xMin'):
-                              final_width = int(v_width * em_scale)
-                              final_lsb = int(v_lsb * em_scale)
-                          else:
+                      out_hmtx[j_g_name] = (calc_width, int(target_lsb))
+                  if not is_mono:
+                      for code, v_g_name in list(out_cmap.items()):
+                          if 0x0020 <= code <= 0x007E:
+                              final_glyph = out_glyf[v_g_name]
+                              v_width, v_lsb = out_hmtx[v_g_name]
+                              if final_glyph.numberOfContours == 0 or not hasattr(final_glyph, 'xMin'): continue
                               g_x_min, g_x_max = final_glyph.xMin, final_glyph.xMax
                               actual_char_width = g_x_max - g_x_min
-                              if actual_char_width <= 0:
-                                  final_width = int(v_width * em_scale)
-                                  final_lsb = int(v_lsb * em_scale)
+                              if actual_char_width <= 0: continue
+                              final_width = actual_char_width + LATIN_PADDING_EM
+                              final_lsb = LATIN_PADDING_EM // 2
+                              offset_latin_x = final_lsb - g_x_min
+                              if final_glyph.isComposite():
+                                  for comp in final_glyph.components: comp.x += int(offset_latin_x)
                               else:
-                                  final_width = actual_char_width + LATIN_PADDING_EM
-                                  final_lsb = LATIN_PADDING_EM // 2
-                                  offset_latin_x = final_lsb - g_x_min
-                                  if final_glyph.isComposite():
-                                      for comp in final_glyph.components: comp.x += int(offset_latin_x)
-                                  else:
-                                      for i in range(len(final_glyph.coordinates)):
-                                          cx, cy = final_glyph.coordinates[i]
-                                          final_glyph.coordinates[i] = (cx + int(offset_latin_x), cy)
-                          out_hmtx[ja_g_name] = (final_width, final_lsb)
-                  v_font.close()
+                                  for i in range(len(final_glyph.coordinates)):
+                                      cx, cy = final_glyph.coordinates[i]
+                                      final_glyph.coordinates[i] = (cx + int(offset_latin_x), cy)
+                              out_hmtx[v_g_name] = (final_width, final_lsb)
+                  ja_font.close()
                   full_name = f"{brand_family} {style_str}"
                   postscript_name = f"{brand_family}-{style_str}"
                   out_font['name'].names = []
