@@ -31,12 +31,15 @@ jobs:
         uses: actions/cache@v4
         with:
           path: dist/
-          key: iosevka-v9-${{ hashFiles('private-build-plans.toml') }}
+          key: iosevka-v11-${{ hashFiles('private-build-plans.toml', 'private-build-plans-roc.toml') }}
       - run: xxd -r -p zen_hex.txt > ./ZenMaruGothic-Light.ttf
       - if: steps.cache-iosevka.outputs.cache-hit != 'true'
-        env:
-          IOSEVKA_CUSTOM_PLAN_PATH: private-build-plans.toml
-        run: npm run build -- 'ttf::IosevkaCustom'
+        run: |
+          cp private-build-plans.toml private-build-plans.toml.bak
+          npm run build -- 'ttf::IosevkaCustom'
+          cp private-build-plans-roc.toml private-build-plans.toml
+          npm run build -- 'ttf::IosevkaRoc'
+          mv private-build-plans.toml.bak private-build-plans.toml
       - name: Create Machiko Fonts
         shell: python
         env:
@@ -53,7 +56,7 @@ jobs:
           ja_font_path = "ZenMaruGothic-Light.ttf"
           built_files = glob.glob("dist/**/*.ttf", recursive=True)
           os.makedirs("dist_machiko", exist_ok=True)
-          sample_font = TTFont(built_files)
+          sample_font = TTFont(built_files[0])
           base_upem = sample_font['head'].unitsPerEm
           iosevka_half_width, _ = sample_font['hmtx'].metrics.get('A', (500, 0))
           target_ja_width = int(iosevka_half_width * 5 / 3)
@@ -64,13 +67,15 @@ jobs:
           for ttf_path in built_files:
               if "node_modules" in ttf_path: continue
               filename = os.path.basename(ttf_path)
-              if "IosevkaCustom" not in filename: continue
+              if "IosevkaCustom" in filename: base_key, brand_prefix = "IosevkaCustom", "Machiko"
+              elif "IosevkaRoc" in filename: base_key, brand_prefix = "IosevkaRoc", "MachikoROC"
+              else: continue
               is_bold = "Bold" in filename
               style_str = "Bold" if is_bold else "Regular"
               for is_mono in [True, False]:
                   suffix = "Mono" if is_mono else "Prop"
-                  brand_family = f"Machiko{suffix}"
-                  machiko_path = os.path.join("dist_machiko", filename.replace("IosevkaCustom", brand_family))
+                  brand_family = f"{brand_prefix}{suffix}"
+                  machiko_path = os.path.join("dist_machiko", filename.replace(base_key, brand_family))
                   out_font = TTFont(ttf_path)
                   out_cmap = out_font['cmap'].getBestCmap()
                   out_hmtx = out_font['hmtx'].metrics
@@ -93,25 +98,17 @@ jobs:
                       trans_pen = TransformPen(t_pen, (em_scale, 0.0, 0.0, em_scale, 0.0, 0.0))
                       rec_pen.replay(trans_pen)
                       out_glyf[j_g_name] = t_pen.glyph()
-                      for table in out_font['cmap'].tables:
-                          table.cmap[code] = j_g_name
+                      for table in out_font['cmap'].tables: table.cmap[code] = j_g_name
                       orig_glyph = out_glyf[j_g_name]
                       if orig_glyph.numberOfContours == 0 or not hasattr(orig_glyph, 'xMin'):
                           out_hmtx[j_g_name] = (target_ja_width if is_mono else int(v_width * em_scale * current_ratio), 0)
                           continue
                       orig_x_min, orig_x_max = orig_glyph.xMin, orig_glyph.xMax
                       orig_content_width = orig_x_max - orig_x_min
-                      if orig_content_width <= 0:
-                          orig_content_width = int(v_width * em_scale)
-                          orig_x_min = 0
-                      if is_mono:
-                          ideal_content_width = target_ja_width * current_ratio
-                          scale_x = ideal_content_width / orig_content_width
-                          calc_width = target_ja_width
-                      else:
-                          scale_x = current_ratio
-                          ideal_content_width = orig_content_width * current_ratio
-                          calc_width = int(v_width * em_scale * current_ratio)
+                      if orig_content_width <= 0: orig_content_width, orig_x_min = int(v_width * em_scale), 0
+                      if is_mono: scale_x, calc_width = (target_ja_width * current_ratio) / orig_content_width, target_ja_width
+                      else: scale_x, calc_width = current_ratio, int(v_width * em_scale * current_ratio)
+                      ideal_content_width = orig_content_width * scale_x
                       target_lsb = (calc_width - ideal_content_width) / 2
                       offset_x = target_lsb - (orig_x_min * scale_x)
                       if orig_glyph.isComposite():
@@ -144,26 +141,13 @@ jobs:
                   full_name = f"{brand_family} {style_str}"
                   postscript_name = f"{brand_family}-{style_str}"
                   out_font['name'].names = []
-                  name_data = {
-                      1: brand_family,
-                      2: style_str,
-                      3: f"1.000;UKWN;{postscript_name}",
-                      4: full_name,
-                      6: postscript_name
-                  }
+                  name_data = {1: brand_family, 2: style_str, 3: f"1.000;UKWN;{postscript_name}", 4: full_name, 6: postscript_name}
                   for nid, text_val in name_data.items():
-                      nr_win_ja = NameRecord()
-                      nr_win_ja.platformID, nr_win_ja.platEncID, nr_win_ja.langID, nr_win_ja.nameID = 3, 1, 0x0411, nid
-                      nr_win_ja.string = text_val.encode('utf-16-be')
-                      out_font['name'].names.append(nr_win_ja)
-                      nr_win_en = NameRecord()
-                      nr_win_en.platformID, nr_win_en.platEncID, nr_win_en.langID, nr_win_en.nameID = 3, 1, 0x0409, nid
-                      nr_win_en.string = text_val.encode('utf-16-be')
-                      out_font['name'].names.append(nr_win_en)
-                      nr_mac = NameRecord()
-                      nr_mac.platformID, nr_mac.platEncID, nr_mac.langID, nr_mac.nameID = 1, 0, 0, nid
-                      nr_mac.string = text_val.encode('ascii', 'ignore')
-                      out_font['name'].names.append(nr_mac)
+                      for p_id, e_id, l_id, enc in [(3, 1, 0x0411, 'utf-16-be'), (3, 1, 0x0409, 'utf-16-be'), (1, 0, 0, 'ascii')]:
+                          nr = NameRecord()
+                          nr.platformID, nr.platEncID, nr.langID, nr.nameID = p_id, e_id, l_id, nid
+                          nr.string = text_val.encode(enc, 'ignore')
+                          out_font['name'].names.append(nr)
                   if 'OS/2' in out_font:
                       out_font['OS/2'].usWeightClass = 700 if is_bold else 400
                       out_font['OS/2'].ulCodePageRange1 |= 0x00020001
@@ -172,14 +156,11 @@ jobs:
                           out_font['OS/2'].panose.bFamilyType = 2
                           out_font['OS/2'].panose.bSerifStyle = 11
                           out_font['OS/2'].panose.bProportion = 3 if is_mono else 0
-                  if 'post' in out_font:
-                      out_font['post'].isFixedPitch = 1 if is_mono else 0
-                  if is_mono and 'hhea' in out_font:
-                      out_font['hhea'].advanceWidthMax = int(target_ja_width)
+                  if 'post' in out_font: out_font['post'].isFixedPitch = 1 if is_mono else 0
+                  if is_mono and 'hhea' in out_font: out_font['hhea'].advanceWidthMax = int(target_ja_width)
                   out_font.save(machiko_path)
                   out_font.close()
                   print(f"Generated: {machiko_path}")
-      
       - name: Upload Both Artifacts
         uses: actions/upload-artifact@v4
         with:
