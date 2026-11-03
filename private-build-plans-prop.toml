@@ -1,6 +1,6 @@
 [buildPlans.IosevkaProp]
 family = "Iosevka Prop Custom"
-spacing = "quasi-proportional"
+spacing = "normal"
 serifs = "sans"
 noCvSs = true
 exportGlyphNames = false
@@ -25,7 +25,7 @@ exportGlyphNames = false
     asterisk = "turn-hex-low"
     dollar = "through"
     cent = "through"
-    lig-neq = "slightly-slanted-dotted"
+    lig-neq = "vertical-dotted"
     lig-equal-chain = "without-notch"
     lig-hyphen-chain = "without-notch"
     lig-plus-chain = "without-notch"
