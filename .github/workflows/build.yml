@@ -31,13 +31,13 @@ jobs:
         uses: actions/cache@v4
         with:
           path: dist/
-          key: iosevka-v11-${{ hashFiles('private-build-plans.toml', 'private-build-plans-roc.toml') }}
+          key: iosevka-v11-${{ hashFiles('private-build-plans.toml', 'private-build-plans-prop.toml') }}
       - run: xxd -r -p zen_hex.txt > ./ZenMaruGothic-Light.ttf
       - if: steps.cache-iosevka.outputs.cache-hit != 'true'
         run: |
           cp private-build-plans.toml private-build-plans.toml.bak
           npm run build -- 'ttf::IosevkaCustom'
-          cp private-build-plans-roc.toml private-build-plans.toml
+          cp private-private-build-plans-prop.toml private-build-plans.toml
           npm run build -- 'ttf::IosevkaRoc'
           mv private-build-plans.toml.bak private-build-plans.toml
       - name: Create Machiko Fonts
