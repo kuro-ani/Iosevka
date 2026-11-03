@@ -55,10 +55,16 @@ jobs:
       - name: Build Base Font
         if: steps.cache-iosevka.outputs.cache-hit != 'true'
         run: |
-          export IOSEVKA_CUSTOM_PLAN_PATH=private-build-plans.toml
-          npm run build -- 'ttf::IosevkaCustom'
-          export IOSEVKA_CUSTOM_PLAN_PATH=private-build-plans-prop.toml
-          npm run build -- 'ttf::IosevkaProp'
+           # 1. 既存のMono用プランでビルド
+            cp private-build-plans.toml private-build-plans.toml.bak
+            npm run build -- 'ttf::IosevkaCustom'
+          
+            # 2. Prop用プランで上書きしてビルド
+            cp private-build-plans-prop.toml private-build-plans.toml
+            npm run build -- 'ttf::IosevkaProp'
+          
+            # 3. 念のため元のプランファイルに戻しておく
+            mv private-build-plans.toml.bak private-build-plans.toml
 
       # 等幅(Mono)・可変(Prop)の2種同時生成マージパイプライン
       - name: Create Machiko Fonts (Merge and Process Mono/Prop)
