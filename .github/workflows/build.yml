@@ -127,25 +127,27 @@ jobs:
                       w_val, l_val = v_hmtx.metrics[v_g_name]
                       out_hmtx.metrics[ja_g_name] = (int(w_val * em_scale), int(l_val * em_scale))
                       
-              for g_name in v_font['hmtx'].metrics.keys():
-                  if g_name not in out_font['glyf']:
-                      # 🛠️ 【超核心修正】フォント全体のOrderと、hmtxテーブル内部の個別Orderの両方にグリフ名を登録
-                      # これにより、fontToolsがコンパイル時にhmtxループでKeyErrorを起こすのを完全に阻止します
-                      if g_name not in out_font.getGlyphOrder():
-                          out_font.getGlyphOrder().append(g_name)
-                      if not hasattr(out_hmtx, 'glyphOrder'):
-                          out_hmtx.glyphOrder = list(out_font.getGlyphOrder())
-                      elif g_name not in out_hmtx.glyphOrder:
-                          out_hmtx.glyphOrder.append(g_name)
-                          
-                      rec_pen = DecomposingRecordingPen(v_glyph_set)
-                      v_glyph_set[g_name].draw(rec_pen)
-                      t_pen = TTGlyphPen(out_glyph_set)
-                      trans_pen = TransformPen(t_pen, (em_scale, 0.0, 0.0, em_scale, 0.0, 0.0))
-                      rec_pen.replay(trans_pen)
-                      out_glyf[g_name] = t_pen.glyph()
-                      w_val, l_val = v_hmtx.metrics[g_name]
-                      out_hmtx.metrics[g_name] = (int(w_val * em_scale), int(l_val * em_scale))
+              # 🛠️ 【根本修正】Iosevka側にあるすべてのグリフ（合字・特殊グリフ含む）を網羅して完全インジェクト
+              for g_name in v_font.getGlyphOrder():
+                  # フォントマスターのGlyphOrderに登録がない新規合字グリフを公式登録
+                  if g_name not in out_font.getGlyphOrder():
+                      out_font.getGlyphOrder().append(g_name)
+                      
+                  # hmtxインスタンス側の内部個別Orderにも確実に同期登録
+                  if not hasattr(out_hmtx, 'glyphOrder'):
+                      out_hmtx.glyphOrder = list(out_font.getGlyphOrder())
+                  elif g_name not in out_hmtx.glyphOrder:
+                      out_hmtx.glyphOrder.append(g_name)
+                      
+                  # Iosevka側の実グリフデータをアウトライン・文字幅ともに100%全転写（上書き/新規追加）
+                  rec_pen = DecomposingRecordingPen(v_glyph_set)
+                  v_glyph_set[g_name].draw(rec_pen)
+                  t_pen = TTGlyphPen(out_glyph_set)
+                  trans_pen = TransformPen(t_pen, (em_scale, 0.0, 0.0, em_scale, 0.0, 0.0))
+                  rec_pen.replay(trans_pen)
+                  out_glyf[g_name] = t_pen.glyph()
+                  w_val, l_val = v_hmtx.metrics[g_name]
+                  out_hmtx.metrics[g_name] = (int(w_val * em_scale), int(l_val * em_scale))
 
               if not is_mono:
                   for g_name in v_font['hmtx'].metrics.keys():
