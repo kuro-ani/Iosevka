@@ -85,14 +85,6 @@ jobs:
               target_ja_width = int(iosevka_half_width * em_scale * 5 / 3)
               out_glyph_set = out_font.getGlyphSet()
               
-              # 🛠️ 【超重要・最優先修正】ループに入る前に、マージ元の全グリフ名をあらかじめマージ先に予約・統合する
-              # これにより、hmtxテーブルクラスが内部で保持する glyphOrder と完全に同期させ、KeyErrorを100%防ぎます
-              combined_order = list(out_font.getGlyphOrder())
-              for g_name in v_font.getGlyphOrder():
-                  if g_name not in combined_order:
-                      combined_order.append(g_name)
-              out_font.setGlyphOrder(combined_order)
-              
               for code, j_g_name in out_cmap.items():
                   if code < 0x007F: continue
                   v_w, v_l = out_hmtx.metrics[j_g_name]
@@ -137,9 +129,15 @@ jobs:
                       
               for g_name in v_font['hmtx'].metrics.keys():
                   if g_name not in out_font['glyf']:
-                      # 🛠️ 辞書構造へのダミー確保だけでなく、事前にセットした順番に沿って直接データを完全転写
-                      out_hmtx.metrics[g_name] = (0, 0)
-                      
+                      # 🛠️ 【超核心修正】フォント全体のOrderと、hmtxテーブル内部の個別Orderの両方にグリフ名を登録
+                      # これにより、fontToolsがコンパイル時にhmtxループでKeyErrorを起こすのを完全に阻止します
+                      if g_name not in out_font.getGlyphOrder():
+                          out_font.getGlyphOrder().append(g_name)
+                      if not hasattr(out_hmtx, 'glyphOrder'):
+                          out_hmtx.glyphOrder = list(out_font.getGlyphOrder())
+                      elif g_name not in out_hmtx.glyphOrder:
+                          out_hmtx.glyphOrder.append(g_name)
+                          
                       rec_pen = DecomposingRecordingPen(v_glyph_set)
                       v_glyph_set[g_name].draw(rec_pen)
                       t_pen = TTGlyphPen(out_glyph_set)
