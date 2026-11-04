@@ -1,6 +1,6 @@
 [buildPlans.IosevkaProp]
 family = "Iosevka Prop Custom"
-spacing = "quasi-proportional"
+spacing = "normal"
 serifs = "sans"
 noCvSs = true
 exportGlyphNames = false
