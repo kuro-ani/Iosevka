@@ -49,36 +49,44 @@ jobs:
           from fontTools.pens.transformPen import TransformPen
           from fontTools.pens.ttGlyphPen import TTGlyphPen
           from fontTools.pens.recordingPen import DecomposingRecordingPen
+          
           ja_font_path = "ZenMaruGothic-Light.ttf"
           built_files = glob.glob("dist/**/*.ttf", recursive=True)
           os.makedirs("dist_machiko", exist_ok=True)
           MONO_SHRINK_RATIO = float(os.environ.get("MONO_RATIO", 0.92))
           PROP_SCALE_X_RATIO = float(os.environ.get("PROP_RATIO", 0.80))
+          
           for ttf_path in built_files:
               if "node_modules" in ttf_path: continue
               filename = os.path.basename(ttf_path)
               if "IosevkaCustom" in filename: base_key, brand_family, is_mono, current_ratio = "IosevkaCustom", "MachikoMono", True, MONO_SHRINK_RATIO
               elif "IosevkaProp" in filename: base_key, brand_family, is_mono, current_ratio = "IosevkaProp", "MachikoProp", False, PROP_SCALE_X_RATIO
               else: continue
+              
               is_bold = "Bold" in filename
               style_str = "Bold" if is_bold else "Regular"
               machiko_path = os.path.join("dist_machiko", filename.replace(base_key, brand_family))
+              
               out_font = TTFont(ja_font_path)
               out_cmap = out_font['cmap'].getBestCmap()
               out_hmtx = out_font['hmtx'].metrics
               out_glyf = out_font['glyf']
               out_upem = out_font['head'].unitsPerEm
+              
               v_font = TTFont(ttf_path)
               v_cmap = v_font['cmap'].getBestCmap()
               v_hmtx = v_font['hmtx'].metrics
               v_glyf = v_font['glyf']
               v_glyph_set = v_font.getGlyphSet()
               v_upem = v_font['head'].unitsPerEm
+              
               em_scale = out_upem / v_upem
               iosevka_half_width, _ = v_hmtx.get('A', (500, 0))
               target_ja_width = int(iosevka_half_width * em_scale * 5 / 3)
               out_glyph_set = out_font.getGlyphSet()
-              for code, j_g_name in ja_cmap.items():
+              
+              # 🛠️ バグ修正: 未定義 ja_cmap を駆逐し、安全な out_cmap に統一
+              for code, j_g_name in out_cmap.items():
                   if code < 0x007F: continue
                   v_w, v_l = out_hmtx[j_g_name]
                   orig_glyph = out_glyf[j_g_name]
@@ -98,6 +106,7 @@ jobs:
                       ideal_content_width = orig_content_width * scale_x
                   target_lsb = (calc_width - ideal_content_width) / 2
                   offset_x = target_lsb - (orig_x_min * scale_x)
+                  
                   rec_pen = DecomposingRecordingPen(out_glyph_set)
                   out_glyph_set[j_g_name].draw(rec_pen)
                   t_pen = TTGlyphPen(out_glyph_set)
@@ -106,6 +115,8 @@ jobs:
                   out_glyf[j_g_name] = t_pen.glyph()
                   out_hmtx[j_g_name] = (calc_width, int(target_lsb))
                   for table in out_font['cmap'].tables: table.cmap[code] = j_g_name
+                  
+              # 英数字（ASCII通常文字）の転写
               for v_code, v_g_name in v_cmap.items():
                   if 0x0020 <= v_code <= 0x007E:
                       ja_g_name = out_cmap.get(v_code)
@@ -118,6 +129,8 @@ jobs:
                       out_glyf[ja_g_name] = t_pen.glyph()
                       w_val, l_val = v_hmtx[v_g_name]
                       out_hmtx[ja_g_name] = (int(w_val * em_scale), int(l_val * em_scale))
+                      
+              # リガチャ用特殊非ASCIIグリフの完全転写（GSUB命令との連動用）
               for g_name in v_font['hmtx'].metrics.keys():
                   if g_name not in out_glyf:
                       rec_pen = DecomposingRecordingPen(v_glyph_set)
@@ -128,18 +141,21 @@ jobs:
                       out_glyf[g_name] = t_pen.glyph()
                       w_val, l_val = v_hmtx[g_name]
                       out_hmtx[g_name] = (int(w_val * em_scale), int(l_val * em_scale))
+                      
+              # Prop版の英数字・合字特殊グリフに対するパディング自動測定＆中央寄せ
               if not is_mono:
-                  for g_name in out_font['hmtx'].metrics.keys():
-                      if g_name in out_cmap.values(): continue
+                  for g_name in v_font['hmtx'].metrics.keys():
                       g_obj = out_glyf[g_name]
                       if g_obj.numberOfContours == 0 or not hasattr(g_obj, 'xMin'): continue
                       g_x_min, g_x_max = g_obj.xMin, g_obj.xMax
                       actual_w = g_x_max - g_x_min
                       if actual_w <= 0: continue
-                      pad = int(out_upem * 0.12)
+                      
+                      pad = int(out_upem * 0.06) # 1000UPEMに対し計60のパディング
                       new_w = actual_w + pad
                       new_lsb = pad // 2
                       shift_x = new_lsb - g_x_min
+                      
                       if g_obj.isComposite():
                           for comp in g_obj.components: comp.x += int(shift_x)
                       else:
@@ -147,18 +163,23 @@ jobs:
                               cx, cy = g_obj.coordinates[i]
                               g_obj.coordinates[i] = (cx + int(shift_x), cy)
                       out_hmtx[g_name] = (new_w, new_lsb)
+                      
               for table_tag in ['GSUB', 'GDEF', 'GPOS']:
                   if table_tag in v_font: out_font[table_tag] = v_font[table_tag]
               v_font.close()
+              
+              # 🛠️ 回収した後半部分のロジックを完全結合
               full_name = f"{brand_family} {style_str}"
               postscript_name = f"{brand_family}-{style_str}"
               uniq_id = f"1.000;UKWN;{postscript_name}"
-              out_font['name'].names = []
+              
+              out_font['name'].names = [] # 初期化して完全同期
               name_data = {1: brand_family, 2: style_str, 3: uniq_id, 4: full_name, 6: postscript_name}
               for nid, text_val in name_data.items():
                   out_font['name'].setName(text_val, nid, 3, 1, 0x0411)
                   out_font['name'].setName(text_val, nid, 3, 1, 0x0409)
                   out_font['name'].setName(text_val, nid, 1, 0, 0)
+                  
               if 'OS/2' in out_font:
                   out_font['OS/2'].usWeightClass = 700 if is_bold else 400
                   out_font['OS/2'].ulCodePageRange1 |= 0x00020001
@@ -167,11 +188,17 @@ jobs:
                       out_font['OS/2'].panose.bFamilyType = 2
                       out_font['OS/2'].panose.bSerifStyle = 11
                       out_font['OS/2'].panose.bProportion = 3 if is_mono else 0
-              if 'post' in out_font: out_font['post'].isFixedPitch = 1 if is_mono else 0
-              if is_mono and 'hhea' in out_font: out_font['hhea'].advanceWidthMax = target_ja_width
+                      
+              if 'post' in out_font: 
+                  out_font['post'].isFixedPitch = 1 if is_mono else 0
+                  
+              if is_mono and 'hhea' in out_font: 
+                  out_font['hhea'].advanceWidthMax = target_ja_width
+                  
               out_font.save(machiko_path)
               out_font.close()
               print(f"Generated: {machiko_path}")
+              
       - name: Upload Both Artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -180,3 +207,4 @@ jobs:
             dist/**/*.ttf
             dist_machiko/*.ttf
           if-no-files-found: error
+          
