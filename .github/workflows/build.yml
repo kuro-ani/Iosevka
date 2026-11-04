@@ -85,6 +85,14 @@ jobs:
               target_ja_width = int(iosevka_half_width * em_scale * 5 / 3)
               out_glyph_set = out_font.getGlyphSet()
               
+              # 🛠️ 【超重要・最優先修正】ループに入る前に、マージ元の全グリフ名をあらかじめマージ先に予約・統合する
+              # これにより、hmtxテーブルクラスが内部で保持する glyphOrder と完全に同期させ、KeyErrorを100%防ぎます
+              combined_order = list(out_font.getGlyphOrder())
+              for g_name in v_font.getGlyphOrder():
+                  if g_name not in combined_order:
+                      combined_order.append(g_name)
+              out_font.setGlyphOrder(combined_order)
+              
               for code, j_g_name in out_cmap.items():
                   if code < 0x007F: continue
                   v_w, v_l = out_hmtx.metrics[j_g_name]
@@ -114,9 +122,6 @@ jobs:
                   out_glyf[j_g_name] = t_pen.glyph()
                   out_hmtx.metrics[j_g_name] = (calc_width, int(target_lsb))
                   for table in out_font['cmap'].tables: table.cmap[code] = j_g_name
-              # 🛠️ 新しいグリフをフォントの公式登録簿（Glyph Order）に追加するためのリスト
-              new_glyph_order = list(out_font.getGlyphOrder())
-
               for v_code, v_g_name in v_cmap.items():
                   if 0x0020 <= v_code <= 0x007E:
                       ja_g_name = out_cmap.get(v_code)
@@ -131,14 +136,9 @@ jobs:
                       out_hmtx.metrics[ja_g_name] = (int(w_val * em_scale), int(l_val * em_scale))
                       
               for g_name in v_font['hmtx'].metrics.keys():
-                  if g_name not in out_glyf:
-                      if g_name not in new_glyph_order:
-                          new_glyph_order.append(g_name)
-                      
-                      # 🛠️ 【最重要修正】マージ先hmtxテーブルの辞書構造にキー枠を強制的に初期化
-                      # これにより compile() 実行時に特定の新規グリフが見つからない KeyError を根本から防ぎます
-                      if g_name not in out_hmtx.metrics:
-                          out_hmtx.metrics[g_name] = (0, 0)
+                  if g_name not in out_font['glyf']:
+                      # 🛠️ 辞書構造へのダミー確保だけでなく、事前にセットした順番に沿って直接データを完全転写
+                      out_hmtx.metrics[g_name] = (0, 0)
                       
                       rec_pen = DecomposingRecordingPen(v_glyph_set)
                       v_glyph_set[g_name].draw(rec_pen)
@@ -148,9 +148,6 @@ jobs:
                       out_glyf[g_name] = t_pen.glyph()
                       w_val, l_val = v_hmtx.metrics[g_name]
                       out_hmtx.metrics[g_name] = (int(w_val * em_scale), int(l_val * em_scale))
-                      
-              # 更新した登録簿をフォントに確定適用
-              out_font.setGlyphOrder(new_glyph_order)
 
               if not is_mono:
                   for g_name in v_font['hmtx'].metrics.keys():
