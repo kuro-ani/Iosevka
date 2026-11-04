@@ -49,8 +49,6 @@ jobs:
           from fontTools.pens.transformPen import TransformPen
           from fontTools.pens.ttGlyphPen import TTGlyphPen
           from fontTools.pens.recordingPen import DecomposingRecordingPen
-          # 🛠️ 警告・バグ対策: レイアウトテーブル再インデックス用のヘルパーをインポート
-          from fontTools.otlLib.maxContextCalc import maxCtxFont
           
           ja_font_path = "ZenMaruGothic-Light.ttf"
           built_files = glob.glob("dist/**/*.ttf", recursive=True)
@@ -71,28 +69,28 @@ jobs:
               
               out_font = TTFont(ja_font_path)
               out_cmap = out_font['cmap'].getBestCmap()
-              out_hmtx = out_font['hmtx'].metrics
+              out_hmtx = out_font['hmtx']
               out_glyf = out_font['glyf']
               out_upem = out_font['head'].unitsPerEm
               
               v_font = TTFont(ttf_path)
               v_cmap = v_font['cmap'].getBestCmap()
-              v_hmtx = v_font['hmtx'].metrics
+              v_hmtx = v_font['hmtx']
               v_glyf = v_font['glyf']
               v_glyph_set = v_font.getGlyphSet()
               v_upem = v_font['head'].unitsPerEm
               
               em_scale = out_upem / v_upem
-              iosevka_half_width, _ = v_hmtx.get('A', (500, 0))
+              iosevka_half_width, _ = v_hmtx.metrics.get('A', (500, 0))
               target_ja_width = int(iosevka_half_width * em_scale * 5 / 3)
               out_glyph_set = out_font.getGlyphSet()
               
               for code, j_g_name in out_cmap.items():
                   if code < 0x007F: continue
-                  v_w, v_l = out_hmtx[j_g_name]
+                  v_w, v_l = out_hmtx.metrics[j_g_name]
                   orig_glyph = out_glyf[j_g_name]
                   if orig_glyph.numberOfContours == 0 or not hasattr(orig_glyph, 'xMin'):
-                      out_hmtx[j_g_name] = (target_ja_width if is_mono else int(v_w * current_ratio), 0)
+                      out_hmtx.metrics[j_g_name] = (target_ja_width if is_mono else int(v_w * current_ratio), 0)
                       continue
                   orig_x_min, orig_x_max = orig_glyph.xMin, orig_glyph.xMax
                   orig_content_width = orig_x_max - orig_x_min
@@ -114,9 +112,8 @@ jobs:
                   trans_pen = TransformPen(t_pen, (scale_x, 0.0, 0.0, 1.0, offset_x, 0.0))
                   rec_pen.replay(trans_pen)
                   out_glyf[j_g_name] = t_pen.glyph()
-                  out_hmtx[j_g_name] = (calc_width, int(target_lsb))
+                  out_hmtx.metrics[j_g_name] = (calc_width, int(target_lsb))
                   for table in out_font['cmap'].tables: table.cmap[code] = j_g_name
-                  
               for v_code, v_g_name in v_cmap.items():
                   if 0x0020 <= v_code <= 0x007E:
                       ja_g_name = out_cmap.get(v_code)
@@ -127,8 +124,8 @@ jobs:
                       trans_pen = TransformPen(t_pen, (em_scale, 0.0, 0.0, em_scale, 0.0, 0.0))
                       rec_pen.replay(trans_pen)
                       out_glyf[ja_g_name] = t_pen.glyph()
-                      w_val, l_val = v_hmtx[v_g_name]
-                      out_hmtx[ja_g_name] = (int(w_val * em_scale), int(l_val * em_scale))
+                      w_val, l_val = v_hmtx.metrics[v_g_name]
+                      out_hmtx.metrics[ja_g_name] = (int(w_val * em_scale), int(l_val * em_scale))
                       
               for g_name in v_font['hmtx'].metrics.keys():
                   if g_name not in out_glyf:
@@ -138,18 +135,22 @@ jobs:
                       trans_pen = TransformPen(t_pen, (em_scale, 0.0, 0.0, em_scale, 0.0, 0.0))
                       rec_pen.replay(trans_pen)
                       out_glyf[g_name] = t_pen.glyph()
-                      w_val, l_val = v_hmtx[g_name]
-                      out_hmtx[g_name] = (int(w_val * em_scale), int(l_val * em_scale))
+                      w_val, l_val = v_hmtx.metrics[g_name]
+                      out_hmtx.metrics[g_name] = (int(w_val * em_scale), int(l_val * em_scale))
                       
               if not is_mono:
                   for g_name in v_font['hmtx'].metrics.keys():
-                      g_obj = out_glyf[g_name]
+                      target_g_name = g_name
+                      if len(g_name) == 1 and 0x0020 <= ord(g_name) <= 0x007E:
+                          target_g_name = out_cmap.get(ord(g_name), g_name)
+                          
+                      g_obj = out_glyf[target_g_name]
                       if g_obj.numberOfContours == 0 or not hasattr(g_obj, 'xMin'): continue
                       g_x_min, g_x_max = g_obj.xMin, g_obj.xMax
                       actual_w = g_x_max - g_x_min
                       if actual_w <= 0: continue
                       
-                      pad = int(out_upem * 0.06)
+                      pad = int(out_upem * 0.06) 
                       new_w = actual_w + pad
                       new_lsb = pad // 2
                       shift_x = new_lsb - g_x_min
@@ -160,7 +161,7 @@ jobs:
                           for i in range(len(g_obj.coordinates)):
                               cx, cy = g_obj.coordinates[i]
                               g_obj.coordinates[i] = (cx + int(shift_x), cy)
-                      out_hmtx[g_name] = (new_w, new_lsb)
+                      out_hmtx.metrics[target_g_name] = (new_w, new_lsb)
                       
               for table_tag in ['GSUB', 'GDEF', 'GPOS']:
                   if table_tag in v_font: out_font[table_tag] = v_font[table_tag]
@@ -191,10 +192,6 @@ jobs:
                   
               if is_mono and 'hhea' in out_font: 
                   out_font['hhea'].advanceWidthMax = target_ja_width
-              
-              # 🛠️ 【最重要】GSUB/GPOS のカバレッジを現在のGlyph ID順に強制ソート＆コンパイル
-              # これにより「Coverage is not sorted...」警告が完全に消滅し、リガチャが100%正常動作します
-              maxCtxFont(out_font)
                   
               out_font.save(machiko_path)
               out_font.close()
@@ -208,4 +205,3 @@ jobs:
             dist/**/*.ttf
             dist_machiko/*.ttf
           if-no-files-found: error
-          
