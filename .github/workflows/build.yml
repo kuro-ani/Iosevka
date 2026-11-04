@@ -8,9 +8,6 @@ on:
       prop_scale_x_ratio:
         required: true
         default: "0.80"
-      latin_padding_width:
-        required: true
-        default: "60"
 
 jobs:
   build:
@@ -32,7 +29,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: dist/
-          key: iosevka-v13-${{ hashFiles('private-build-plans.toml', 'private-build-plans-prop.toml') }}
+          key: iosevka-v14-${{ hashFiles('private-build-plans.toml', 'private-build-plans-prop.toml') }}
       - run: xxd -r -p zen_hex.txt > ./ZenMaruGothic-Light.ttf
       - if: steps.cache-iosevka.outputs.cache-hit != 'true'
         run: |
@@ -46,7 +43,6 @@ jobs:
         env:
           MONO_RATIO: ${{ github.event.inputs.mono_shrink_ratio }}
           PROP_RATIO: ${{ github.event.inputs.prop_scale_x_ratio }}
-          LATIN_PADDING: ${{ github.event.inputs.latin_padding_width }}
         run: |
           import os, glob
           from fontTools.ttLib import TTFont
@@ -56,30 +52,42 @@ jobs:
           ja_font_path = "ZenMaruGothic-Light.ttf"
           built_files = glob.glob("dist/**/*.ttf", recursive=True)
           os.makedirs("dist_machiko", exist_ok=True)
+          
+          # 等幅リガチャ参照用のフォントを特定
+          mono_ref_path = [f for f in built_files if "IosevkaCustom" in f and "node_modules" not in f][0]
+          mono_ref_font = TTFont(mono_ref_path)
+          ligature_gsub = mono_ref_font.get('GSUB') if 'GSUB' in mono_ref_font else None
+          
           sample_font = TTFont(built_files[0])
           base_upem = sample_font['head'].unitsPerEm
           iosevka_half_width, _ = sample_font['hmtx'].metrics.get('A', (500, 0))
           target_ja_width = int(iosevka_half_width * 5 / 3)
           sample_font.close()
+          
           MONO_SHRINK_RATIO = float(os.environ.get("MONO_RATIO", 0.92))
           PROP_SCALE_X_RATIO = float(os.environ.get("PROP_RATIO", 0.80))
-          LATIN_PADDING_EM = int(os.environ.get("LATIN_PADDING", 60))
+          
           for ttf_path in built_files:
               if "node_modules" in ttf_path: continue
               filename = os.path.basename(ttf_path)
-              if "IosevkaCustom" in filename:
-                  base_key, brand_family, is_mono = "IosevkaCustom", "MachikoMono", True
-              elif "IosevkaProp" in filename:
-                  base_key, brand_family, is_mono = "IosevkaProp", "MachikoProp", False
+              if "IosevkaCustom" in filename: base_key, brand_family, is_mono = "IosevkaCustom", "MachikoMono", True
+              elif "IosevkaProp" in filename: base_key, brand_family, is_mono = "IosevkaProp", "MachikoProp", False
               else: continue
               is_bold = "Bold" in filename
               style_str = "Bold" if is_bold else "Regular"
               machiko_path = os.path.join("dist_machiko", filename.replace(base_key, brand_family))
+              
               out_font = TTFont(ttf_path)
+              
+              # Prop版には等幅版から抽出したリガチャテーブル(GSUB)を物理注入
+              if not is_mono and ligature_gsub:
+                  out_font['GSUB'] = ligature_gsub
+                  
               out_cmap = out_font['cmap'].getBestCmap()
               out_hmtx = out_font['hmtx'].metrics
               out_glyf = out_font['glyf']
               out_upem = out_font['head'].unitsPerEm
+              
               ja_font = TTFont(ja_font_path)
               ja_cmap = ja_font['cmap'].getBestCmap()
               ja_hmtx = ja_font['hmtx'].metrics
@@ -88,6 +96,7 @@ jobs:
               em_scale = out_upem / ja_upem
               current_ratio = MONO_SHRINK_RATIO if is_mono else PROP_SCALE_X_RATIO
               out_glyph_set = out_font.getGlyphSet()
+              
               for code, j_g_name in ja_cmap.items():
                   if code < 0x007F: continue
                   v_width, v_lsb = ja_hmtx[j_g_name]
@@ -97,19 +106,28 @@ jobs:
                   trans_pen = TransformPen(t_pen, (em_scale, 0.0, 0.0, em_scale, 0.0, 0.0))
                   rec_pen.replay(trans_pen)
                   out_glyf[j_g_name] = t_pen.glyph()
+                  
                   for table in out_font['cmap'].tables: table.cmap[code] = j_g_name
+                  
                   orig_glyph = out_glyf[j_g_name]
                   if orig_glyph.numberOfContours == 0 or not hasattr(orig_glyph, 'xMin'):
                       out_hmtx[j_g_name] = (target_ja_width if is_mono else int(v_width * em_scale * current_ratio), 0)
                       continue
+                      
                   orig_x_min, orig_x_max = orig_glyph.xMin, orig_glyph.xMax
                   orig_content_width = orig_x_max - orig_x_min
                   if orig_content_width <= 0: orig_content_width, orig_x_min = int(v_width * em_scale), 0
-                  if is_mono: scale_x, calc_width = (target_ja_width * current_ratio) / orig_content_width, target_ja_width
-                  else: scale_x, calc_width = current_ratio, int(v_width * em_scale * current_ratio)
+                  
+                  if is_mono:
+                      scale_x, calc_width = (target_ja_width * current_ratio) / orig_content_width, target_ja_width
+                  else:
+                      scale_x = current_ratio
+                      calc_width = int(v_width * em_scale * current_ratio)
+                      
                   ideal_content_width = orig_content_width * scale_x
                   target_lsb = (calc_width - ideal_content_width) / 2
                   offset_x = target_lsb - (orig_x_min * scale_x)
+                  
                   if orig_glyph.isComposite():
                       for comp in orig_glyph.components: comp.x = int(comp.x * scale_x + offset_x)
                   else:
@@ -117,25 +135,7 @@ jobs:
                           x, y = orig_glyph.coordinates[i]
                           orig_glyph.coordinates[i] = (int(x * scale_x + offset_x), y)
                   out_hmtx[j_g_name] = (calc_width, int(target_lsb))
-              if not is_mono:
-                  out_cmap_fixed = out_font['cmap'].getBestCmap()
-                  for code, v_g_name in list(out_cmap_fixed.items()):
-                      if 0x0020 <= code <= 0x007E:
-                          final_glyph = out_glyf[v_g_name]
-                          if final_glyph.numberOfContours == 0 or not hasattr(final_glyph, 'xMin'): continue
-                          g_x_min, g_x_max = final_glyph.xMin, final_glyph.xMax
-                          actual_char_width = g_x_max - g_x_min
-                          if actual_char_width <= 0: continue
-                          final_width = actual_char_width + LATIN_PADDING_EM
-                          final_lsb = LATIN_PADDING_EM // 2
-                          offset_latin_x = final_lsb - g_x_min
-                          if final_glyph.isComposite():
-                              for comp in final_glyph.components: comp.x += int(offset_latin_x)
-                          else:
-                              for i in range(len(final_glyph.coordinates)):
-                                  cx, cy = final_glyph.coordinates[i]
-                                  final_glyph.coordinates[i] = (cx + int(offset_latin_x), cy)
-                          out_hmtx[v_g_name] = (final_width, final_lsb)
+                  
               ja_font.close()
               full_name = f"{brand_family} {style_str}"
               postscript_name = f"{brand_family}-{style_str}"
@@ -159,6 +159,7 @@ jobs:
               out_font.save(machiko_path)
               out_font.close()
               print(f"Generated: {machiko_path}")
+          mono_ref_font.close()
       - name: Upload Both Artifacts
         uses: actions/upload-artifact@v4
         with:
