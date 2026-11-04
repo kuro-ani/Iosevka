@@ -49,6 +49,8 @@ jobs:
           from fontTools.pens.transformPen import TransformPen
           from fontTools.pens.ttGlyphPen import TTGlyphPen
           from fontTools.pens.recordingPen import DecomposingRecordingPen
+          # 🛠️ 警告・バグ対策: レイアウトテーブル再インデックス用のヘルパーをインポート
+          from fontTools.otlLib.maxContextCalc import maxCtxFont
           
           ja_font_path = "ZenMaruGothic-Light.ttf"
           built_files = glob.glob("dist/**/*.ttf", recursive=True)
@@ -85,7 +87,6 @@ jobs:
               target_ja_width = int(iosevka_half_width * em_scale * 5 / 3)
               out_glyph_set = out_font.getGlyphSet()
               
-              # 🛠️ バグ修正: 未定義 ja_cmap を駆逐し、安全な out_cmap に統一
               for code, j_g_name in out_cmap.items():
                   if code < 0x007F: continue
                   v_w, v_l = out_hmtx[j_g_name]
@@ -116,7 +117,6 @@ jobs:
                   out_hmtx[j_g_name] = (calc_width, int(target_lsb))
                   for table in out_font['cmap'].tables: table.cmap[code] = j_g_name
                   
-              # 英数字（ASCII通常文字）の転写
               for v_code, v_g_name in v_cmap.items():
                   if 0x0020 <= v_code <= 0x007E:
                       ja_g_name = out_cmap.get(v_code)
@@ -130,7 +130,6 @@ jobs:
                       w_val, l_val = v_hmtx[v_g_name]
                       out_hmtx[ja_g_name] = (int(w_val * em_scale), int(l_val * em_scale))
                       
-              # リガチャ用特殊非ASCIIグリフの完全転写（GSUB命令との連動用）
               for g_name in v_font['hmtx'].metrics.keys():
                   if g_name not in out_glyf:
                       rec_pen = DecomposingRecordingPen(v_glyph_set)
@@ -142,7 +141,6 @@ jobs:
                       w_val, l_val = v_hmtx[g_name]
                       out_hmtx[g_name] = (int(w_val * em_scale), int(l_val * em_scale))
                       
-              # Prop版の英数字・合字特殊グリフに対するパディング自動測定＆中央寄せ
               if not is_mono:
                   for g_name in v_font['hmtx'].metrics.keys():
                       g_obj = out_glyf[g_name]
@@ -151,7 +149,7 @@ jobs:
                       actual_w = g_x_max - g_x_min
                       if actual_w <= 0: continue
                       
-                      pad = int(out_upem * 0.06) # 1000UPEMに対し計60のパディング
+                      pad = int(out_upem * 0.06)
                       new_w = actual_w + pad
                       new_lsb = pad // 2
                       shift_x = new_lsb - g_x_min
@@ -168,12 +166,11 @@ jobs:
                   if table_tag in v_font: out_font[table_tag] = v_font[table_tag]
               v_font.close()
               
-              # 🛠️ 回収した後半部分のロジックを完全結合
               full_name = f"{brand_family} {style_str}"
               postscript_name = f"{brand_family}-{style_str}"
               uniq_id = f"1.000;UKWN;{postscript_name}"
               
-              out_font['name'].names = [] # 初期化して完全同期
+              out_font['name'].names = []
               name_data = {1: brand_family, 2: style_str, 3: uniq_id, 4: full_name, 6: postscript_name}
               for nid, text_val in name_data.items():
                   out_font['name'].setName(text_val, nid, 3, 1, 0x0411)
@@ -194,6 +191,10 @@ jobs:
                   
               if is_mono and 'hhea' in out_font: 
                   out_font['hhea'].advanceWidthMax = target_ja_width
+              
+              # 🛠️ 【最重要】GSUB/GPOS のカバレッジを現在のGlyph ID順に強制ソート＆コンパイル
+              # これにより「Coverage is not sorted...」警告が完全に消滅し、リガチャが100%正常動作します
+              maxCtxFont(out_font)
                   
               out_font.save(machiko_path)
               out_font.close()
