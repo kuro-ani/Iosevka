@@ -8,6 +8,7 @@ on:
       prop_scale_x_ratio:
         required: true
         default: "0.80"
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -28,7 +29,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: dist/
-          key: iosevka-v18-${{ hashFiles('private-build-plans.toml', 'private-build-plans-prop.toml') }}
+          key: iosevka-v19-${{ hashFiles('private-build-plans.toml', 'private-build-plans-prop.toml') }}
       - run: xxd -r -p zen_hex.txt > ./ZenMaruGothic-Light.ttf
       - if: steps.cache-iosevka.outputs.cache-hit != 'true'
         run: |
@@ -45,9 +46,7 @@ jobs:
         run: |
           import os, glob
           from fontTools.ttLib import TTFont
-          from fontTools.pens.transformPen import TransformPen
-          from fontTools.pens.ttGlyphPen import TTGlyphPen
-          from fontTools.pens.recordingPen import DecomposingRecordingPen
+          from fontTools.ttLib.tables._n_a_m_e import NameRecord
           ja_font_path = "ZenMaruGothic-Light.ttf"
           built_files = glob.glob("dist/**/*.ttf", recursive=True)
           os.makedirs("dist_machiko", exist_ok=True)
@@ -62,74 +61,57 @@ jobs:
               is_bold = "Bold" in filename
               style_str = "Bold" if is_bold else "Regular"
               machiko_path = os.path.join("dist_machiko", filename.replace(base_key, brand_family))
-              out_font = TTFont(ttf_path)
+              
+              # 解像度1000の「Zen丸ゴシック」を完全な土台（ベース）にする
+              out_font = TTFont(ja_font_path)
               out_cmap = out_font['cmap'].getBestCmap()
               out_hmtx = out_font['hmtx'].metrics
               out_glyf = out_font['glyf']
               out_upem = out_font['head'].unitsPerEm
-              iosevka_half_width, _ = out_hmtx.get('A', (500, 0))
-              target_ja_width = int(iosevka_half_width * 5 / 3)
-              ja_font = TTFont(ja_font_path)
-              ja_cmap = ja_font['cmap'].getBestCmap()
-              ja_hmtx = ja_font['hmtx'].metrics
-              ja_glyph_set = ja_font.getGlyphSet()
-              ja_upem = ja_font['head'].unitsPerEm
-              em_scale = out_upem / ja_upem
-              out_glyph_set = out_font.getGlyphSet()
-              for code, j_g_name in ja_cmap.items():
+              
+              # Iosevka（解像度1024）から英数字とリガチャ命令を完全同期して吸い上げる
+              v_font = TTFont(ttf_path)
+              v_cmap = v_font['cmap'].getBestCmap()
+              v_hmtx = v_font['hmtx'].metrics
+              v_glyf = v_font['glyf']
+              v_upem = v_font['head'].unitsPerEm
+              em_scale = out_upem / v_upem # 1000 / 1024 のスケール比率を自動算出
+              
+              # 日本語（全角文字）のみを対象に、指定された比率（0.80倍など）で文字幅だけを精密に長体化
+              for code, g_name in list(out_cmap.items()):
                   if code < 0x007F: continue
-                  v_width, _ = ja_hmtx[j_g_name]
-                  rec_pen = DecomposingRecordingPen(ja_glyph_set)
-                  ja_glyph_set[j_g_name].draw(rec_pen)
-                  t_pen = TTGlyphPen(out_glyph_set)
-                  trans_pen = TransformPen(t_pen, (em_scale, 0.0, 0.0, em_scale, 0.0, 0.0))
-                  rec_pen.replay(trans_pen)
-                  out_glyf[j_g_name] = t_pen.glyph()
-                  for table in out_font['cmap'].tables: table.cmap[code] = j_g_name
-                  orig_glyph = out_glyf[j_g_name]
-                  if orig_glyph.numberOfContours == 0 or not hasattr(orig_glyph, 'xMin'):
-                      out_hmtx[j_g_name] = (target_ja_width if is_mono else int(v_width * em_scale * current_ratio), 0)
-                      continue
-                  orig_x_min, orig_x_max = orig_glyph.xMin, orig_glyph.xMax
-                  orig_content_width = orig_x_max - orig_x_min
-                  if orig_content_width <= 0: orig_content_width, orig_x_min = int(v_width * em_scale), 0
+                  v_w, v_l = out_hmtx[g_name]
                   if is_mono:
-                      scale_x = (target_ja_width * current_ratio) / orig_content_width
-                      calc_width = target_ja_width
-                      ideal_content_width = target_ja_width * current_ratio
+                      iosevka_half_width, _ = v_hmtx.get('A', (500, 0))
+                      calc_width = int(iosevka_half_width * em_scale * 5 / 3)
+                      ideal_content_width = calc_width * current_ratio
                   else:
-                      scale_x = current_ratio
-                      calc_width = int(v_width * em_scale * current_ratio)
-                      ideal_content_width = orig_content_width * scale_x
+                      calc_width = int(v_w * current_ratio)
+                      ideal_content_width = (g_x_max - g_x_min) * current_ratio if (hasattr(out_glyf[g_name], 'xMin') and (g_x_max := out_glyf[g_name].xMax) and (g_x_min := out_glyf[g_name].xMin)) else calc_width
                   target_lsb = (calc_width - ideal_content_width) / 2
-                  offset_x = target_lsb - (orig_x_min * scale_x)
-                  if orig_glyph.isComposite():
-                      for comp in orig_glyph.components: comp.x = int(comp.x * scale_x + offset_x)
-                  else:
-                      for i in range(len(orig_glyph.coordinates)):
-                          x, y = orig_glyph.coordinates[i]
-                          orig_glyph.coordinates[i] = (int(x * scale_x + offset_x), y)
-                  out_hmtx[j_g_name] = (calc_width, int(target_lsb))
-              if not is_mono:
-                  out_cmap_fixed = out_font['cmap'].getBestCmap()
-                  for code, v_g_name in list(out_cmap_fixed.items()):
-                      if 0x0020 <= code <= 0x007E:
-                          final_glyph = out_glyf[v_g_name]
-                          if final_glyph.numberOfContours == 0 or not hasattr(final_glyph, 'xMin'): continue
-                          g_x_min, g_x_max = final_glyph.xMin, final_glyph.xMax
-                          actual_char_width = g_x_max - g_x_min
-                          if actual_char_width <= 0: continue
-                          final_width = actual_char_width + 60
-                          final_lsb = 30
-                          offset_latin_x = final_lsb - g_x_min
-                          if final_glyph.isComposite():
-                              for comp in final_glyph.components: comp.x += int(offset_latin_x)
-                          else:
-                              for i in range(len(final_glyph.coordinates)):
-                                  cx, cy = final_glyph.coordinates[i]
-                                  final_glyph.coordinates[i] = (cx + int(offset_latin_x), cy)
-                          out_hmtx[v_g_name] = (final_width, final_lsb)
-              ja_font.close()
+                  out_hmtx[g_name] = (calc_width, int(target_lsb))
+              
+              # Iosevkaの英数字（ASCII）および合字・リガチャ関連グリフを解像度を1000に補正して完全移植
+              for v_code, v_g_name in v_cmap.items():
+                  if 0x0020 <= v_code <= 0x007E:
+                      ja_g_name = out_cmap.get(v_code)
+                      if not ja_g_name: continue
+                      out_glyf[ja_g_name] = v_glyf[v_g_name]
+                      w_val, l_val = v_hmtx[v_g_name]
+                      out_hmtx[ja_g_name] = (int(w_val * em_scale), int(l_val * em_scale))
+              
+              # リガチャに不可欠なIosevkaの電子命令および特殊合字グリフ群を丸ごとマージ
+              for g_name in v_font['hmtx'].metrics.keys():
+                  if g_name not in out_glyf:
+                      out_glyf[g_name] = v_glyf[g_name]
+                      w_val, l_val = v_hmtx[g_name]
+                      out_hmtx[g_name] = (int(w_val * em_scale), int(l_val * em_scale))
+              
+              for table_tag in ['GSUB', 'GDEF', 'GPOS']:
+                  if table_tag in v_font: out_font[table_tag] = v_font[table_tag]
+              v_font.close()
+              
+              # メタデータおよびネーミングテーブルの刷新（Chromeブロック対策済）
               full_name = f"{brand_family} {style_str}"
               postscript_name = f"{brand_family}-{style_str}"
               uniq_id = f"1.000;UKWN;{postscript_name}"
@@ -148,10 +130,12 @@ jobs:
                       out_font['OS/2'].panose.bSerifStyle = 11
                       out_font['OS/2'].panose.bProportion = 3 if is_mono else 0
               if 'post' in out_font: out_font['post'].isFixedPitch = 1 if is_mono else 0
-              if is_mono and 'hhea' in out_font: out_font['hhea'].advanceWidthMax = int(target_ja_width)
+              if is_mono and 'hhea' in out_font:
+                  iosevka_half_width, _ = v_hmtx.get('A', (500, 0))
+                  out_font['hhea'].advanceWidthMax = int(iosevka_half_width * em_scale * 5 / 3)
               out_font.save(machiko_path)
               out_font.close()
-              print(f"Generated: {machiko_path}")
+              print(f"Successfully generated: {machiko_path}")
       - name: Upload Both Artifacts
         uses: actions/upload-artifact@v4
         with:
