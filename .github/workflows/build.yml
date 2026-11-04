@@ -114,6 +114,9 @@ jobs:
                   out_glyf[j_g_name] = t_pen.glyph()
                   out_hmtx.metrics[j_g_name] = (calc_width, int(target_lsb))
                   for table in out_font['cmap'].tables: table.cmap[code] = j_g_name
+              # 🛠️ バグ修正: 新しいグリフをフォントの公式登録簿（Glyph Order）に追加するためのリスト
+              new_glyph_order = list(out_font.getGlyphOrder())
+
               for v_code, v_g_name in v_cmap.items():
                   if 0x0020 <= v_code <= 0x007E:
                       ja_g_name = out_cmap.get(v_code)
@@ -129,6 +132,10 @@ jobs:
                       
               for g_name in v_font['hmtx'].metrics.keys():
                   if g_name not in out_glyf:
+                      # 🛠️ 核心の修正: 新規合字グリフを公式の Glyph Order に登録して KeyError を完全防止
+                      if g_name not in new_glyph_order:
+                          new_glyph_order.append(g_name)
+                      
                       rec_pen = DecomposingRecordingPen(v_glyph_set)
                       v_glyph_set[g_name].draw(rec_pen)
                       t_pen = TTGlyphPen(out_glyph_set)
@@ -138,6 +145,9 @@ jobs:
                       w_val, l_val = v_hmtx.metrics[g_name]
                       out_hmtx.metrics[g_name] = (int(w_val * em_scale), int(l_val * em_scale))
                       
+              # 🛠️ 更新した登録簿をフォントに確定適用
+              out_font.setGlyphOrder(new_glyph_order)
+
               if not is_mono:
                   for g_name in v_font['hmtx'].metrics.keys():
                       target_g_name = g_name
