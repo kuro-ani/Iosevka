@@ -131,23 +131,30 @@ jobs:
                       out_font['OS/2'].panose.bFamilyType = 2
                       out_font['OS/2'].panose.bSerifStyle = 11
                       out_font['OS/2'].panose.bProportion = 3 if is_mono else 0
-                  valid_widths = [w for w, _ in final_hmtx_metrics.values() if w > 0]
-                  if valid_widths: out_font['OS/2'].xAvgCharWidth = int(sum(valid_widths) / len(valid_widths))
+                  # Mono版の間延び抑制ハック：平均幅に強制指定のターゲット値を叩き込む
+                  if is_mono:
+                      out_font['OS/2'].xAvgCharWidth = iosevka_char_width
+                  else:
+                      valid_widths = [w for w, _ in final_hmtx_metrics.values() if w > 0]
+                      if valid_widths: out_font['OS/2'].xAvgCharWidth = int(sum(valid_widths) / len(valid_widths))
               if 'post' in out_font: out_font['post'].isFixedPitch = 1 if is_mono else 0
               
-              # --- [確定一本化ロジック] ---
               if 'hhea' in out_font:
                   if is_mono:
-                      # Mono版のみ、全グリフ数に固有のメトリクス幅を持たせるよう強制指定
-                      out_font['hhea'].numberOfHMetrics = len(new_glyph_order)
                       out_font['hhea'].advanceWidthMax = target_ja_width
+                      out_font['hhea'].numberOfHMetrics = len(new_glyph_order)
+                      # システム側の自動マージン計算をバインドするため、ヘッダーの最小LSBを英数基準に固定
+                      out_font['hhea'].minLeftSideBearing = 0
 
-              # 新造したhmtxテーブルをコンパイル直前にインジェクト
+              # 【超重要ハック】システム側に全角用の自動余白（間延び空間）を強制挿入させている
+              # Iosevka本来のGDEF（Glyph Definition）テーブルをMono版から完全削除する
+              if is_mono and 'GDEF' in out_font:
+                  del out_font['GDEF']
+
               new_hmtx = table__h_m_t_x()
               new_hmtx.metrics = final_hmtx_metrics
               out_font['hmtx'] = new_hmtx
               
-              # 古いコンパイルキャッシュを確実に消去して一発保存
               if hasattr(out_font['hmtx'], 'compiled'):
                   del out_font['hmtx'].compiled
               
