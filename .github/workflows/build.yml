@@ -107,12 +107,10 @@ jobs:
                   v_w, v_l = ja_hmtx.metrics[j_g_name]
                   orig_glyph = ja_glyf[j_g_name]
                   
-                  # 🛠️ 核心修正：空白グリフ等の境界データを持たない文字の処理
+                  # 空白グリフ等の境界データを持たない文字の処理
                   if orig_glyph.numberOfContours == 0 or not hasattr(orig_glyph, 'xMin'):
                       out_hmtx.metrics[unique_ja_g_name] = (target_ja_width if is_mono else int(v_w * em_scale * current_ratio), 0)
-                      # glyfテーブルへ実体データを完全転写（KeyErrorを根本防衛）
                       out_glyf[unique_ja_g_name] = orig_glyph
-                      # 内部のすべてのcmapサブテーブルへ一括マッピング
                       for table in out_font['cmap'].tables: table.cmap[code] = unique_ja_g_name
                       continue
                       
@@ -149,11 +147,21 @@ jobs:
               if hasattr(out_hmtx, 'glyphOrder'):
                   out_hmtx.glyphOrder = list(new_glyph_order)
 
-              # MachikoProp用の半角英数字＋合字の「精密プロポーショナル化」パディング処理
+              # MachikoProp用の半角英数字の「精密プロポーショナル化」パディング処理
               if not is_mono:
                   for g_name in out_font.getGlyphOrder():
-                      # 追加した日本語グリフ（ja_）は処理済みのためスキップ
+                      # 追加した日本語グリフ（ja_）はスキップ
                       if g_name.startswith("ja_"): continue
+                      
+                      # 🛠️ 【リガチャ防衛の核心】単体の半角英数字（cmapに単一の文字としてマップされているASCII文字）のみを対象とする
+                      # これにより、glyph00001 などのリガチャ用グリフや非ASCII特殊文字は完全にスルーされ、純正の幅とコンポーネントが維持されます
+                      is_standard_ascii = False
+                      for code_point, mapped_name in out_cmap.items():
+                          if mapped_name == g_name and 0x0021 <= code_point <= 0x007E:
+                              is_standard_ascii = True
+                              break
+                              
+                      if not is_standard_ascii: continue
                       
                       g_obj = out_glyf[g_name]
                       if g_obj.numberOfContours == 0 or not hasattr(g_obj, 'xMin'): continue
