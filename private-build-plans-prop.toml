@@ -29,10 +29,10 @@ exportGlyphNames = true
     cent = "through"
 
   # 3. リガチャー（合字）をプロポーショナル環境でも強制有効化するブロックを追加
-  [buildPlans.IosevkaProp.ligations]
-  inherits = "default-calt"
-    
-  # ご指定のリガチャースタイルをここに集約
+[buildPlans.IosevkaProp.ligations]
+  inherits = "default-calt"  # 👈 これを指定するだけで演算子も矢印もすべて自動で網羅されます
+
+  # 個別の形状カスタム指定
   lig-neq = "slightly-slanted-dotted"
   lig-equal-chain = "without-notch"
   lig-hyphen-chain = "without-notch"
