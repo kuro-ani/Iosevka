@@ -31,8 +31,7 @@ exportGlyphNames = true
   # 3. リガチャー（合字）をプロポーショナル環境でも強制有効化するブロックを追加
   [buildPlans.IosevkaProp.ligations]
   inherits = "default-calt"
-  enables = ["operators", "arrows", "fira-code-like"]
-  
+    
   # ご指定のリガチャースタイルをここに集約
   lig-neq = "slightly-slanted-dotted"
   lig-equal-chain = "without-notch"
