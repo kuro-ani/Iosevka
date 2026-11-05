@@ -18,6 +18,8 @@ exportGlyphNames = false
     g = "single-storey-earless-corner"
     i = "semi-tailed"
     l = "serifed-semi-tailed"
+	m = "earless-corner-double-arch-tailed-serifless"
+    n = "straight-motion-serifed"
     v = "curly-serifless"
     x = "chancery"
     y = "curly-turn-serifless"
@@ -80,6 +82,8 @@ exportGlyphNames = true
     g = "single-storey-earless-corner"
     i = "semi-tailed"
     l = "serifed-semi-tailed"
+	m = "earless-corner-double-arch-tailed-serifless"
+    n = "straight-motion-serifed"
     v = "curly-serifless"
     x = "chancery"
     y = "curly-turn-serifless"
@@ -93,7 +97,7 @@ exportGlyphNames = true
   inherits = "default-calt"  # 👈 これを指定するだけで演算子も矢印もすべて自動で網羅されます
 
   # 個別の形状カスタム指定
-  lig-neq = "more-slanted-dotted"
+  lig-neq = "vertical-dotted"
   lig-equal-chain = "without-notch"
   lig-hyphen-chain = "without-notch"
   lig-plus-chain = "without-notch"
