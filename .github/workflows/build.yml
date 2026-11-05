@@ -48,6 +48,8 @@ jobs:
           from fontTools.pens.transformPen import TransformPen
           from fontTools.pens.ttGlyphPen import TTGlyphPen
           from fontTools.pens.recordingPen import DecomposingRecordingPen
+          # 🛠️ 新しいhmtxテーブルを安全にゼロから再コンパイルするためのクラスを導入
+          from fontTools.ttLib.tables._h_m_t_x import table__h_m_t_x
           
           ja_font_path = "ZenMaruGothic-Light.ttf"
           built_files = glob.glob("dist/**/*.ttf", recursive=True)
@@ -59,7 +61,7 @@ jobs:
               if "node_modules" in ttf_path: continue
               filename = os.path.basename(ttf_path)
               if "IosevkaCustom" in filename: base_key, brand_family, is_mono, user_ratio = "IosevkaCustom", "MachikoMono", True, MONO_SHRINK_RATIO
-              elif "IosevkaProp" in filename: base_key, brand_family, is_mono, current_ratio = "IosevkaProp", "MachikoProp", False, PROP_SCALE_X_RATIO
+              elif "IosevkaProp" in filename: base_key, brand_family, is_mono, user_ratio = "IosevkaProp", "MachikoProp", False, PROP_SCALE_X_RATIO
               else: continue
               
               is_bold = "Bold" in filename
@@ -68,9 +70,13 @@ jobs:
               
               out_font = TTFont(ttf_path)
               out_cmap = out_font['cmap'].getBestCmap()
-              out_hmtx = out_font['hmtx']
               out_glyf = out_font['glyf']
               out_upem = out_font['head'].unitsPerEm
+              
+              # 🛠️ コンパイル時の自動リセットバグを物理的に完全消滅させるためのシャドウ辞書
+              final_hmtx_metrics = {}
+              for k, v in out_font['hmtx'].metrics.items():
+                  final_hmtx_metrics[k] = v
               
               ja_font = TTFont(ja_font_path)
               ja_cmap = ja_font['cmap'].getBestCmap()
@@ -80,16 +86,12 @@ jobs:
               ja_upem = ja_font['head'].unitsPerEm
               
               out_upem_scale = out_upem / ja_upem
-              iosevka_char_width, _ = out_hmtx.metrics.get('A', (500, 0))
+              iosevka_char_width, _ = out_font['hmtx'].metrics.get('A', (500, 0))
               
-              # 🛠️ 【超重要修正】Mono版のスケール計算と全角幅をIosevkaのリアルな解像度に完全同期
               if is_mono:
-                  # 半角：全角 ＝ 3 : 5 固定（例: 半角600なら全角1000に完璧にマッピング）
                   target_ja_width = int(iosevka_char_width * 5 / 3)
-                  # 文字データの縮小倍率も、解像度比率（out_upem_scale）を基準にして正確に0.92倍を乗算
                   dynamic_scale_x = out_upem_scale * (target_ja_width / 1000.0) * user_ratio
               else:
-                  # Prop版は現状の完璧な挙動を維持
                   dynamic_scale_x = out_upem_scale * ((iosevka_char_width * 2) / 1000.0) * user_ratio
                   target_ja_width = int(1000 * dynamic_scale_x)
                   
@@ -97,21 +99,17 @@ jobs:
               new_glyph_order = list(out_font.getGlyphOrder())
               # 2. 日本語全角文字の「物理長体変形」＆「重なり/隙間完全消滅型」マージ
               for code, j_g_name in ja_cmap.items():
-                  # 半角英数字(ASCII領域)はマスター側(Iosevka)を100%守るため絶対に上書きしない
                   if code < 0x007F: continue
                   
                   unique_ja_g_name = f"ja_{j_g_name}"
                   if unique_ja_g_name not in new_glyph_order:
                       new_glyph_order.append(unique_ja_g_name)
-                  if unique_ja_g_name not in out_hmtx.metrics:
-                      out_hmtx.metrics[unique_ja_g_name] = (0, 0)
                       
                   v_w, v_l = ja_hmtx.metrics[j_g_name]
                   orig_glyph = ja_glyf[j_g_name]
                   
-                  # 空白グリフは計算されたリアルな縮小幅だけを割り当ててスキップ
                   if orig_glyph.numberOfContours == 0 or not hasattr(orig_glyph, 'xMin'):
-                      out_hmtx.metrics[unique_ja_g_name] = (target_ja_width if is_mono else int(v_w * dynamic_scale_x), 0)
+                      final_hmtx_metrics[unique_ja_g_name] = (target_ja_width if is_mono else int(v_w * dynamic_scale_x), 0)
                       out_glyf[unique_ja_g_name] = orig_glyph
                       for table in out_font['cmap'].tables: table.cmap[code] = unique_ja_g_name
                       continue
@@ -120,36 +118,30 @@ jobs:
                   orig_content_width = orig_x_max - orig_x_min
                   if orig_content_width <= 0: orig_content_width, orig_x_min = v_w, 0
                   
-                  # 文字の物理中心を算出し、その中心を維持したままX軸のみを本物の倍率で縮小
                   center_x = (orig_x_min + orig_x_max) / 2
                   calc_width = target_ja_width if is_mono else int(v_w * dynamic_scale_x)
                   
-                  # 🛠️ Mono版とProp版それぞれのスケール基準に最適化された配置オフセット計算
-                  if is_mono:
-                      # 登録簿解像度に完全同調させた正確なスケーリング倍率を適用
-                      offset_x = (calc_width / 2) - (center_x * dynamic_scale_x)
-                      target_lsb = int(orig_x_min * dynamic_scale_x + offset_x)
-                      scale_param_x = dynamic_scale_x
-                  else:
-                      offset_x = (calc_width / 2) - (center_x * dynamic_scale_x)
-                      target_lsb = int(orig_x_min * dynamic_scale_x + offset_x)
-                      scale_param_x = dynamic_scale_x
+                  offset_x = (calc_width / 2) - (center_x * dynamic_scale_x)
+                  target_lsb = int(orig_x_min * dynamic_scale_x + offset_x)
                   
-                  # 日本語グリフのアウトライン（形状座標データそのもの）を縦長スリムに強制縮小
                   rec_pen = DecomposingRecordingPen(ja_glyph_set)
                   ja_glyph_set[j_g_name].draw(rec_pen)
                   t_pen = TTGlyphPen(out_font.getGlyphSet())
-                  trans_pen = TransformPen(t_pen, (scale_param_x, 0.0, 0.0, out_upem_scale, offset_x, 0.0))
+                  trans_pen = TransformPen(t_pen, (dynamic_scale_x, 0.0, 0.0, out_upem_scale, offset_x, 0.0))
                   rec_pen.replay(trans_pen)
                   
                   out_glyf[unique_ja_g_name] = t_pen.glyph()
-                  out_hmtx.metrics[unique_ja_g_name] = (calc_width, target_lsb)
+                  final_hmtx_metrics[unique_ja_g_name] = (calc_width, target_lsb)
                   for table in out_font['cmap'].tables: table.cmap[code] = unique_ja_g_name
 
               # 登録簿の更新をマスターに確定適用
               out_font.setGlyphOrder(new_glyph_order)
-              if hasattr(out_hmtx, 'glyphOrder'):
-                  out_hmtx.glyphOrder = list(new_glyph_order)
+
+              # 🛠️ 【超重要・最核心】古いhmtxオブジェクトを完全に破棄し、
+              # すべての日本語文字が完全に網羅された、新品のhmtxテーブルをゼロからビルドして強制換装
+              new_hmtx = table__h_m_t_x()
+              new_hmtx.metrics = final_hmtx_metrics
+              out_font['hmtx'] = new_hmtx
 
               # 日本語ソース（ja_font）の回収クリーンアップ
               ja_font.close()
@@ -175,8 +167,8 @@ jobs:
                       out_font['OS/2'].panose.bSerifStyle = 11
                       out_font['OS/2'].panose.bProportion = 3 if is_mono else 0
                   
-                  # 全グリフ（真に長体スリム化された日本語を含む）のリアルな幅から平均文字幅（xAvgCharWidth）を再注入
-                  valid_widths = [w for w, _ in out_hmtx.metrics.values() if w > 0]
+                  # 全グリフのリアルな幅から平均文字幅（xAvgCharWidth）を再注入
+                  valid_widths = [w for w, _ in final_hmtx_metrics.values() if w > 0]
                   if valid_widths:
                       out_font['OS/2'].xAvgCharWidth = int(sum(valid_widths) / len(valid_widths))
                       
