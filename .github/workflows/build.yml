@@ -86,13 +86,10 @@ jobs:
               out_glyph_set = out_font.getGlyphSet()
               # 新規追加する日本語グリフ名を公式登録簿（Glyph Order）へ追加するための準備
               new_glyph_order = list(out_font.getGlyphOrder())
-              
-              # Iosevkaのcmapテーブルに日本語をインジェクトするための辞書オブジェクトを取得
-              cmap_table = out_font['cmap'].getBestCmap()
 
               # 日本語フォント側の全グリフを巡回し、長体変形を加えながらIosevkaへマージ
               for code, j_g_name in ja_cmap.items():
-                  # 制御文字や半角英数字（ASCII領域）はIosevka側を最優先するためスキップ
+                  # 🛠️ 【リガチャ崩れ絶対防衛】半角英数字領域（ASCII）のcmapは絶対に上書きせずIosevka純正を守る
                   if code < 0x007F: continue
                   
                   # 衝突回避：日本語グリフ名がIosevka側と被らないよう一意の名前（ja_XXXX）を付与
@@ -150,11 +147,8 @@ jobs:
               # MachikoProp用の半角英数字の「精密プロポーショナル化」パディング処理
               if not is_mono:
                   for g_name in out_font.getGlyphOrder():
-                      # 追加した日本語グリフ（ja_）はスキップ
                       if g_name.startswith("ja_"): continue
                       
-                      # 🛠️ 【リガチャ防衛の核心】単体の半角英数字（cmapに単一の文字としてマップされているASCII文字）のみを対象とする
-                      # これにより、glyph00001 などのリガチャ用グリフや非ASCII特殊文字は完全にスルーされ、純正の幅とコンポーネントが維持されます
                       is_standard_ascii = False
                       for code_point, mapped_name in out_cmap.items():
                           if mapped_name == g_name and 0x0021 <= code_point <= 0x007E:
@@ -169,7 +163,6 @@ jobs:
                       actual_w = g_x_max - g_x_min
                       if actual_w <= 0: continue
                       
-                      # 1000UPEMに対し左右各30EM（計60EM）の余白を持たせ、綺麗にプロポーショナル配置
                       pad = int(out_upem * 0.06) 
                       new_w = actual_w + pad
                       new_lsb = pad // 2
@@ -206,6 +199,12 @@ jobs:
                       out_font['OS/2'].panose.bFamilyType = 2
                       out_font['OS/2'].panose.bSerifStyle = 11
                       out_font['OS/2'].panose.bProportion = 3 if is_mono else 0
+                  
+                  # 🛠️ 【プロポーショナル化の核心】すべての有効グリフの幅から平均値を算出してOS/2に上書き注入
+                  # これによりWindowsや秀丸が「完全にスリム化されたプロポーショナル」としてセル幅を認識します
+                  valid_widths = [w for w, _ in out_hmtx.metrics.values() if w > 0]
+                  if valid_widths:
+                      out_font['OS/2'].xAvgCharWidth = int(sum(valid_widths) / len(valid_widths))
                       
               if 'post' in out_font: 
                   out_font['post'].isFixedPitch = 1 if is_mono else 0
