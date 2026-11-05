@@ -29,16 +29,13 @@ jobs:
         uses: actions/cache@v4
         with:
           path: dist/
-          key: iosevka-v22-${{ hashFiles('private-build-plans.toml', 'private-build-plans-prop.toml') }}
+          key: iosevka-v22-${{ hashFiles('private-build-plans.toml') }}
       - run: xxd -r -p zen_hex.txt > ./ZenMaruGothic-Light.ttf
       - if: steps.cache-iosevka.outputs.cache-hit != 'true'
         run: |
-          # 🛠️ IosevkaPropは新しいTOML内の「IosevkaProp」プランをターゲットにしてビルド
-          cp private-build-plans.toml private-build-plans.toml.bak
+          # 🛠️ 入れ替えのcpコマンドを完全排除。統合されたTOMLからそのまま2つのターゲットをクリーンに順次ビルド
           npm run build -- 'ttf::IosevkaCustom'
-          cp private-build-plans-prop.toml private-build-plans.toml
           npm run build -- 'ttf::IosevkaProp'
-          mv private-build-plans.toml.bak private-build-plans.toml
       - name: Create Machiko Fonts
         shell: python
         env:
@@ -68,7 +65,6 @@ jobs:
               style_str = "Bold" if is_bold else "Regular"
               machiko_path = os.path.join("dist_machiko", filename.replace(base_key, brand_family))
               
-              # 🛠️ Iosevka純正のプロポーショナル構造をマスターとして無傷のベースに据える
               out_font = TTFont(ttf_path)
               out_cmap = out_font['cmap'].getBestCmap()
               out_hmtx = out_font['hmtx']
@@ -89,9 +85,7 @@ jobs:
               
               new_glyph_order = list(out_font.getGlyphOrder())
               
-              # 1. 日本語全角文字の「中心基準・ゴミ空白完全排除型」長体化変形
               for code, j_g_name in ja_cmap.items():
-                  # 半角英数字(ASCII領域)はマスター側(Iosevka)を100%守るため絶対に上書きしない
                   if code < 0x007F: continue
                   
                   unique_ja_g_name = f"ja_{j_g_name}"
@@ -103,7 +97,6 @@ jobs:
                   v_w, v_l = ja_hmtx.metrics[j_g_name]
                   orig_glyph = ja_glyf[j_g_name]
                   
-                  # 空白グリフは幅だけを長体に縮小して登録
                   if orig_glyph.numberOfContours == 0 or not hasattr(orig_glyph, 'xMin'):
                       out_hmtx.metrics[unique_ja_g_name] = (target_ja_width if is_mono else int(v_w * em_scale * current_ratio), 0)
                       out_glyf[unique_ja_g_name] = orig_glyph
@@ -114,8 +107,6 @@ jobs:
                   orig_content_width = orig_x_max - orig_x_min
                   if orig_content_width <= 0: orig_content_width, orig_x_min = v_w, 0
                   
-                  # 🛠️ 【超核心修正】全角文字の仮想ボディ中央を正確に測定
-                  # 左端ではなく「文字の中心点」を固定してX軸のみ長体に縮小する
                   center_x = (orig_x_min + orig_x_max) / 2
                   
                   if is_mono:
@@ -125,7 +116,6 @@ jobs:
                       scale_x = current_ratio
                       calc_width = int(v_w * em_scale * current_ratio)
                       
-                  # 中心を基準とした縮小変形のオフセット計算（右側の巨大な隙間の発生を完全抹殺）
                   offset_x = (calc_width / 2) - (center_x * em_scale * scale_x)
                   target_lsb = orig_x_min * em_scale * scale_x + offset_x
                   
@@ -142,10 +132,6 @@ jobs:
               out_font.setGlyphOrder(new_glyph_order)
               if hasattr(out_hmtx, 'glyphOrder'):
                   out_hmtx.glyphOrder = list(new_glyph_order)
-
-              # 🛠️ 【全面刷新】Iosevkaの quasi-proportional データを守るため、Python側での
-              # ASCII(半角英数字)に対する力業パディング＆座標書き換えループを完全撤廃しました。
-              # これにより、!= や <= などの合字の原点ズレ、および文字化けの可能性を根本から完全抹殺します。
 
               # 日本語ソース（ja_font）の回収クリーンアップ
               ja_font.close()
@@ -172,7 +158,6 @@ jobs:
                       out_font['OS/2'].panose.bProportion = 3 if is_mono else 0
                   
                   # 全グリフ（長体化した日本語を含む）のリアルな幅から平均文字幅（xAvgCharWidth）を再計算
-                  # これによりWindowsシステムおよび秀丸などのエディタが「真のプロポーショナル長体」として正確にレンダリングを行います
                   valid_widths = [w for w, _ in out_hmtx.metrics.values() if w > 0]
                   if valid_widths:
                       out_font['OS/2'].xAvgCharWidth = int(sum(valid_widths) / len(valid_widths))
