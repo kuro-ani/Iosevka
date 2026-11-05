@@ -154,17 +154,12 @@ jobs:
               if hasattr(out_font['hmtx'], 'compiled'):
                   del out_font['hmtx'].compiled
               
-              # 1パス目：通常保存（すべての依存テーブルを強制コンパイル・保存完了させる）
               out_font.save(machiko_path)
               out_font.close()
               
-              # 2パス目：【Mono版限定・超低レイヤー直撃型マッピングハック】
-              # 保存後のバイナリを再オープンし、コンパイラの干渉を一切受けない「生データ代入」のみを実行
               if is_mono:
                   fix_font = TTFont(machiko_path)
                   actual_order = fix_font.getGlyphOrder()
-                  
-                  # 1パス目の保存時に自動リネームされた可能性のあるグリフ名を、インデックスから紐付け直す辞書を構築
                   remapped_metrics = {}
                   for idx, current_name in enumerate(actual_order):
                       if idx < len(new_glyph_order):
@@ -172,31 +167,23 @@ jobs:
                           if orig_name in final_hmtx_metrics:
                               remapped_metrics[current_name] = final_hmtx_metrics[orig_name]
                   
-                  # 高レベルコンパイラキャッシュとオブジェクトの完全無効化
                   if hasattr(fix_font['hmtx'], 'metrics'): del fix_font['hmtx'].metrics
                   if hasattr(fix_font['hmtx'], 'compiled'): del fix_font['hmtx'].compiled
-                  
-                  # 再マッピングした「半角3:全角5」の固定値をストレートに流し込む
                   fix_font['hmtx'].metrics = remapped_metrics
-                  
                   if 'hhea' in fix_font:
                       fix_font['hhea'].numberOfHMetrics = len(actual_order)
                       fix_font['hhea'].advanceWidthMax = target_ja_width
-                  
-                  # 縦書き用メトリクス(vmtx)が横書き文字幅を等幅へ強制リセットするのを防ぐため、存在すれば完全に削除
                   if 'vmtx' in fix_font: del fix_font['vmtx']
                   if 'vhea' in fix_font: del fix_font['vhea']
-                  
-                  # fontToolsの内部コンパイル関数そのものを無力化し、現在のメモリ内容をそのままストレートにバイナリ保存
                   fix_font['hmtx'].compile = lambda self: table__h_m_t_x.compile(fix_font['hmtx'], self)
-                  
                   fix_font.save(machiko_path)
                   fix_font.close()
-              out_font.close()
-　　　　　　　print(f"Generated: {machiko_path}")
-- name: Upload Both Artifacts
-　　uses: actions/upload-artifact@v4
-　　with:
-　　name: Machiko-Fonts-Pack
-　　path: dist_machiko/
-　　if-no-files-found: error
+                  
+              print(f"Generated: {machiko_path}")
+
+      - name: Upload Both Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: Machiko-Fonts-Pack
+          path: dist_machiko/
+          if-no-files-found: error
