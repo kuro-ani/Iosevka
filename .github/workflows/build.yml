@@ -33,6 +33,7 @@ jobs:
       - run: xxd -r -p zen_hex.txt > ./ZenMaruGothic-Light.ttf
       - if: steps.cache-iosevka.outputs.cache-hit != 'true'
         run: |
+          # 🛠️ IosevkaPropは新しいTOML内の「IosevkaProp」プランをターゲットにしてビルド
           cp private-build-plans.toml private-build-plans.toml.bak
           npm run build -- 'ttf::IosevkaCustom'
           cp private-build-plans-prop.toml private-build-plans.toml
@@ -67,6 +68,7 @@ jobs:
               style_str = "Bold" if is_bold else "Regular"
               machiko_path = os.path.join("dist_machiko", filename.replace(base_key, brand_family))
               
+              # 🛠️ Iosevka純正のプロポーショナル構造をマスターとして無傷のベースに据える
               out_font = TTFont(ttf_path)
               out_cmap = out_font['cmap'].getBestCmap()
               out_hmtx = out_font['hmtx']
@@ -84,27 +86,24 @@ jobs:
               iosevka_half_width, _ = out_hmtx.metrics.get('A', (500, 0))
               target_ja_width = int(iosevka_half_width * 5 / 3)
               out_glyph_set = out_font.getGlyphSet()
-              # 新規追加する日本語グリフ名を公式登録簿（Glyph Order）へ追加するための準備
+              
               new_glyph_order = list(out_font.getGlyphOrder())
-
-              # 日本語フォント側の全グリフを巡回し、長体変形を加えながらIosevkaへマージ
+              
+              # 1. 日本語全角文字の「中心基準・ゴミ空白完全排除型」長体化変形
               for code, j_g_name in ja_cmap.items():
-                  # 🛠️ 【リガチャ崩れ絶対防衛】半角英数字領域（ASCII）のcmapは絶対に上書きせずIosevka純正を守る
+                  # 半角英数字(ASCII領域)はマスター側(Iosevka)を100%守るため絶対に上書きしない
                   if code < 0x007F: continue
                   
-                  # 衝突回避：日本語グリフ名がIosevka側と被らないよう一意の名前（ja_XXXX）を付与
                   unique_ja_g_name = f"ja_{j_g_name}"
-                  
                   if unique_ja_g_name not in new_glyph_order:
                       new_glyph_order.append(unique_ja_g_name)
-                      
                   if unique_ja_g_name not in out_hmtx.metrics:
                       out_hmtx.metrics[unique_ja_g_name] = (0, 0)
                       
                   v_w, v_l = ja_hmtx.metrics[j_g_name]
                   orig_glyph = ja_glyf[j_g_name]
                   
-                  # 空白グリフ等の境界データを持たない文字の処理
+                  # 空白グリフは幅だけを長体に縮小して登録
                   if orig_glyph.numberOfContours == 0 or not hasattr(orig_glyph, 'xMin'):
                       out_hmtx.metrics[unique_ja_g_name] = (target_ja_width if is_mono else int(v_w * em_scale * current_ratio), 0)
                       out_glyf[unique_ja_g_name] = orig_glyph
@@ -115,20 +114,21 @@ jobs:
                   orig_content_width = orig_x_max - orig_x_min
                   if orig_content_width <= 0: orig_content_width, orig_x_min = v_w, 0
                   
-                  # 軸に合わせた縮小スケールおよびパディングの計算
+                  # 🛠️ 【超核心修正】全角文字の仮想ボディ中央を正確に測定
+                  # 左端ではなく「文字の中心点」を固定してX軸のみ長体に縮小する
+                  center_x = (orig_x_min + orig_x_max) / 2
+                  
                   if is_mono:
                       scale_x = (target_ja_width * current_ratio) / (orig_content_width * em_scale)
                       calc_width = target_ja_width
-                      ideal_content_width = target_ja_width * current_ratio
                   else:
                       scale_x = current_ratio
                       calc_width = int(v_w * em_scale * current_ratio)
-                      ideal_content_width = orig_content_width * em_scale * scale_x
                       
-                  target_lsb = (calc_width - ideal_content_width) / 2
-                  offset_x = target_lsb - (orig_x_min * em_scale * scale_x)
+                  # 中心を基準とした縮小変形のオフセット計算（右側の巨大な隙間の発生を完全抹殺）
+                  offset_x = (calc_width / 2) - (center_x * em_scale * scale_x)
+                  target_lsb = orig_x_min * em_scale * scale_x + offset_x
                   
-                  # 日本語グリフのアウトラインを精密に変形転写
                   rec_pen = DecomposingRecordingPen(ja_glyph_set)
                   ja_glyph_set[j_g_name].draw(rec_pen)
                   t_pen = TTGlyphPen(out_glyph_set)
@@ -138,44 +138,15 @@ jobs:
                   out_glyf[unique_ja_g_name] = t_pen.glyph()
                   out_hmtx.metrics[unique_ja_g_name] = (calc_width, int(target_lsb))
                   for table in out_font['cmap'].tables: table.cmap[code] = unique_ja_g_name
-
               # 登録簿の更新をマスターに確定適用
               out_font.setGlyphOrder(new_glyph_order)
               if hasattr(out_hmtx, 'glyphOrder'):
                   out_hmtx.glyphOrder = list(new_glyph_order)
 
-              # MachikoProp用の半角英数字の「精密プロポーショナル化」パディング処理
-              if not is_mono:
-                  for g_name in out_font.getGlyphOrder():
-                      if g_name.startswith("ja_"): continue
-                      
-                      is_standard_ascii = False
-                      for code_point, mapped_name in out_cmap.items():
-                          if mapped_name == g_name and 0x0021 <= code_point <= 0x007E:
-                              is_standard_ascii = True
-                              break
-                              
-                      if not is_standard_ascii: continue
-                      
-                      g_obj = out_glyf[g_name]
-                      if g_obj.numberOfContours == 0 or not hasattr(g_obj, 'xMin'): continue
-                      g_x_min, g_x_max = g_obj.xMin, g_obj.xMax
-                      actual_w = g_x_max - g_x_min
-                      if actual_w <= 0: continue
-                      
-                      pad = int(out_upem * 0.06) 
-                      new_w = actual_w + pad
-                      new_lsb = pad // 2
-                      shift_x = new_lsb - g_x_min
-                      
-                      if g_obj.isComposite():
-                          for comp in g_obj.components: comp.x += int(shift_x)
-                      else:
-                          for i in range(len(g_obj.coordinates)):
-                              cx, cy = g_obj.coordinates[i]
-                              g_obj.coordinates[i] = (cx + int(shift_x), cy)
-                      out_hmtx.metrics[g_name] = (new_w, new_lsb)
-                      
+              # 🛠️ 【全面刷新】Iosevkaの quasi-proportional データを守るため、Python側での
+              # ASCII(半角英数字)に対する力業パディング＆座標書き換えループを完全撤廃しました。
+              # これにより、!= や <= などの合字の原点ズレ、および文字化けの可能性を根本から完全抹殺します。
+
               # 日本語ソース（ja_font）の回収クリーンアップ
               ja_font.close()
               
@@ -200,8 +171,8 @@ jobs:
                       out_font['OS/2'].panose.bSerifStyle = 11
                       out_font['OS/2'].panose.bProportion = 3 if is_mono else 0
                   
-                  # 🛠️ 【プロポーショナル化の核心】すべての有効グリフの幅から平均値を算出してOS/2に上書き注入
-                  # これによりWindowsや秀丸が「完全にスリム化されたプロポーショナル」としてセル幅を認識します
+                  # 全グリフ（長体化した日本語を含む）のリアルな幅から平均文字幅（xAvgCharWidth）を再計算
+                  # これによりWindowsシステムおよび秀丸などのエディタが「真のプロポーショナル長体」として正確にレンダリングを行います
                   valid_widths = [w for w, _ in out_hmtx.metrics.values() if w > 0]
                   if valid_widths:
                       out_font['OS/2'].xAvgCharWidth = int(sum(valid_widths) / len(valid_widths))
