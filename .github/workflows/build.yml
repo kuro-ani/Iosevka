@@ -135,42 +135,24 @@ jobs:
                   if valid_widths: out_font['OS/2'].xAvgCharWidth = int(sum(valid_widths) / len(valid_widths))
               if 'post' in out_font: out_font['post'].isFixedPitch = 1 if is_mono else 0
               
-              # 【重要】1パス目の段階からコンパイラによるhmtx圧縮を阻止する
+              # --- [確定一本化ロジック] ---
               if 'hhea' in out_font:
                   if is_mono:
-                      out_font['hhea'].advanceWidthMax = target_ja_width
+                      # Mono版のみ、全グリフ数に固有のメトリクス幅を持たせるよう強制指定
                       out_font['hhea'].numberOfHMetrics = len(new_glyph_order)
-              
+                      out_font['hhea'].advanceWidthMax = target_ja_width
+
+              # 新造したhmtxテーブルをコンパイル直前にインジェクト
               new_hmtx = table__h_m_t_x()
               new_hmtx.metrics = final_hmtx_metrics
               out_font['hmtx'] = new_hmtx
               
-              # 1パス目保存
+              # 古いコンパイルキャッシュを確実に消去して一発保存
+              if hasattr(out_font['hmtx'], 'compiled'):
+                  del out_font['hmtx'].compiled
+              
               out_font.save(machiko_path)
               out_font.close()
-              
-              # 2パス目：等幅圧縮最適化をバイパスする、独自のバイトストリーム直撃書き換え
-              if is_mono:
-                  fix_font = TTFont(machiko_path)
-                  
-                  # 高レベルコンパイラが残した中身を完全に破棄
-                  if hasattr(fix_font['hmtx'], 'metrics'): del fix_font['hmtx'].metrics
-                  if hasattr(fix_font['hmtx'], 'compiled'): del fix_font['hmtx'].compiled
-                      
-                  # 「半角3:全角5」の設計値をhmtxテーブルへダイレクトにインジェクト
-                  fix_font['hmtx'].metrics = final_hmtx_metrics
-                  
-                  if 'hhea' in fix_font:
-                      # 省略ロジックを発動させないため、numberOfHMetricsを全グリフ数に絶対固定
-                      fix_font['hhea'].numberOfHMetrics = len(new_glyph_order)
-                      fix_font['hhea'].advanceWidthMax = target_ja_width
-                      
-                  # fontToolsがバイナリ保存時にhmtxを自動再ビルド（圧縮）する関数自体を完全に書き換えて無効化
-                  fix_font['hmtx'].compile = lambda self: table__h_m_t_x.compile(fix_font['hmtx'], self)
-                  
-                  fix_font.save(machiko_path)
-                  fix_font.close()
-                  
               print(f"Generated: {machiko_path}")
       - name: Upload Both Artifacts
         uses: actions/upload-artifact@v4
