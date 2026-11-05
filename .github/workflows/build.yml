@@ -67,100 +67,101 @@ jobs:
               style_str = "Bold" if is_bold else "Regular"
               machiko_path = os.path.join("dist_machiko", filename.replace(base_key, brand_family))
               
-              out_font = TTFont(ja_font_path)
+              # 🛠️ 【核心】Iosevka側をマスターフォント（加工ベース）として読み込む
+              out_font = TTFont(ttf_path)
               out_cmap = out_font['cmap'].getBestCmap()
               out_hmtx = out_font['hmtx']
               out_glyf = out_font['glyf']
               out_upem = out_font['head'].unitsPerEm
               
-              v_font = TTFont(ttf_path)
-              v_cmap = v_font['cmap'].getBestCmap()
-              v_hmtx = v_font['hmtx']
-              v_glyf = v_font['glyf']
-              v_glyph_set = v_font.getGlyphSet()
-              v_upem = v_font['head'].unitsPerEm
+              # 日本語側をマージ元（データ抽出元）とする
+              ja_font = TTFont(ja_font_path)
+              ja_cmap = ja_font['cmap'].getBestCmap()
+              ja_hmtx = ja_font['hmtx']
+              ja_glyf = ja_font['glyf']
+              ja_glyph_set = ja_font.getGlyphSet()
+              ja_upem = ja_font['head'].unitsPerEm
               
-              em_scale = out_upem / v_upem
-              iosevka_half_width, _ = v_hmtx.metrics.get('A', (500, 0))
-              target_ja_width = int(iosevka_half_width * em_scale * 5 / 3)
+              em_scale = out_upem / ja_upem
+              iosevka_half_width, _ = out_hmtx.metrics.get('A', (500, 0))
+              target_ja_width = int(iosevka_half_width * 5 / 3)
               out_glyph_set = out_font.getGlyphSet()
+              # 🛠️ 新規追加する日本語グリフ名を公式登録簿（Glyph Order）へ追加するための準備
+              new_glyph_order = list(out_font.getGlyphOrder())
               
-              for code, j_g_name in out_cmap.items():
+              # Iosevkaのcmapテーブルに日本語をインジェクトするための辞書オブジェクトを取得
+              cmap_table = out_font['cmap'].getBestCmap()
+
+              # 日本語フォント側の全グリフを巡回し、長体変形を加えながらIosevkaへマージ
+              for code, j_g_name in ja_cmap.items():
+                  # 制御文字や半角英数字（ASCII領域）はIosevka側を最優先するためスキップ
                   if code < 0x007F: continue
-                  v_w, v_l = out_hmtx.metrics[j_g_name]
-                  orig_glyph = out_glyf[j_g_name]
+                  
+                  # 衝突回避：日本語グリフ名がIosevka側と被らないよう一意の名前（ja_XXXX）を付与
+                  unique_ja_g_name = f"ja_{j_g_name}"
+                  
+                  if unique_ja_g_name not in new_glyph_order:
+                      new_glyph_order.append(unique_ja_g_name)
+                      
+                  if unique_ja_g_name not in out_hmtx.metrics:
+                      out_hmtx.metrics[unique_ja_g_name] = (0, 0)
+                      
+                  v_w, v_l = ja_hmtx.metrics[j_g_name]
+                  orig_glyph = ja_glyf[j_g_name]
+                  
+                  # 空白グリフ等の境界データを持たない文字の文字幅を処理
                   if orig_glyph.numberOfContours == 0 or not hasattr(orig_glyph, 'xMin'):
-                      out_hmtx.metrics[j_g_name] = (target_ja_width if is_mono else int(v_w * current_ratio), 0)
+                      out_hmtx.metrics[unique_ja_g_name] = (target_ja_width if is_mono else int(v_w * em_scale * current_ratio), 0)
+                      # 内部のすべてのcmapサブテーブルへ一括マッピング
+                      for table in out_font['cmap'].tables: table.cmap[code] = unique_ja_g_name
                       continue
+                      
                   orig_x_min, orig_x_max = orig_glyph.xMin, orig_glyph.xMax
                   orig_content_width = orig_x_max - orig_x_min
                   if orig_content_width <= 0: orig_content_width, orig_x_min = v_w, 0
+                  
+                  # 軸に合わせた縮小スケールおよびパディングの計算
                   if is_mono:
-                      scale_x = (target_ja_width * current_ratio) / orig_content_width
+                      scale_x = (target_ja_width * current_ratio) / (orig_content_width * em_scale)
                       calc_width = target_ja_width
                       ideal_content_width = target_ja_width * current_ratio
                   else:
                       scale_x = current_ratio
-                      calc_width = int(v_w * current_ratio)
-                      ideal_content_width = orig_content_width * scale_x
+                      calc_width = int(v_w * em_scale * current_ratio)
+                      ideal_content_width = orig_content_width * em_scale * scale_x
+                      
                   target_lsb = (calc_width - ideal_content_width) / 2
-                  offset_x = target_lsb - (orig_x_min * scale_x)
+                  offset_x = target_lsb - (orig_x_min * em_scale * scale_x)
                   
-                  rec_pen = DecomposingRecordingPen(out_glyph_set)
-                  out_glyph_set[j_g_name].draw(rec_pen)
+                  # 日本語グリフのアウトラインを精密に変形転写
+                  rec_pen = DecomposingRecordingPen(ja_glyph_set)
+                  ja_glyph_set[j_g_name].draw(rec_pen)
                   t_pen = TTGlyphPen(out_glyph_set)
-                  trans_pen = TransformPen(t_pen, (scale_x, 0.0, 0.0, 1.0, offset_x, 0.0))
+                  trans_pen = TransformPen(t_pen, (em_scale * scale_x, 0.0, 0.0, em_scale, offset_x, 0.0))
                   rec_pen.replay(trans_pen)
-                  out_glyf[j_g_name] = t_pen.glyph()
-                  out_hmtx.metrics[j_g_name] = (calc_width, int(target_lsb))
-                  for table in out_font['cmap'].tables: table.cmap[code] = j_g_name
-              for v_code, v_g_name in v_cmap.items():
-                  if 0x0020 <= v_code <= 0x007E:
-                      ja_g_name = out_cmap.get(v_code)
-                      if not ja_g_name: continue
-                      rec_pen = DecomposingRecordingPen(v_glyph_set)
-                      v_glyph_set[v_g_name].draw(rec_pen)
-                      t_pen = TTGlyphPen(out_glyph_set)
-                      trans_pen = TransformPen(t_pen, (em_scale, 0.0, 0.0, em_scale, 0.0, 0.0))
-                      rec_pen.replay(trans_pen)
-                      out_glyf[ja_g_name] = t_pen.glyph()
-                      w_val, l_val = v_hmtx.metrics[v_g_name]
-                      out_hmtx.metrics[ja_g_name] = (int(w_val * em_scale), int(l_val * em_scale))
-                      
-              # 🛠️ 【根本修正】Iosevka側にあるすべてのグリフ（合字・特殊グリフ含む）を網羅して完全インジェクト
-              for g_name in v_font.getGlyphOrder():
-                  # フォントマスターのGlyphOrderに登録がない新規合字グリフを公式登録
-                  if g_name not in out_font.getGlyphOrder():
-                      out_font.getGlyphOrder().append(g_name)
-                      
-                  # hmtxインスタンス側の内部個別Orderにも確実に同期登録
-                  if not hasattr(out_hmtx, 'glyphOrder'):
-                      out_hmtx.glyphOrder = list(out_font.getGlyphOrder())
-                  elif g_name not in out_hmtx.glyphOrder:
-                      out_hmtx.glyphOrder.append(g_name)
-                      
-                  # Iosevka側の実グリフデータをアウトライン・文字幅ともに100%全転写（上書き/新規追加）
-                  rec_pen = DecomposingRecordingPen(v_glyph_set)
-                  v_glyph_set[g_name].draw(rec_pen)
-                  t_pen = TTGlyphPen(out_glyph_set)
-                  trans_pen = TransformPen(t_pen, (em_scale, 0.0, 0.0, em_scale, 0.0, 0.0))
-                  rec_pen.replay(trans_pen)
-                  out_glyf[g_name] = t_pen.glyph()
-                  w_val, l_val = v_hmtx.metrics[g_name]
-                  out_hmtx.metrics[g_name] = (int(w_val * em_scale), int(l_val * em_scale))
+                  
+                  out_glyf[unique_ja_g_name] = t_pen.glyph()
+                  out_hmtx.metrics[unique_ja_g_name] = (calc_width, int(target_lsb))
+                  for table in out_font['cmap'].tables: table.cmap[code] = unique_ja_g_name
 
+              # 登録簿の更新をマスターに確定適用
+              out_font.setGlyphOrder(new_glyph_order)
+              if hasattr(out_hmtx, 'glyphOrder'):
+                  out_hmtx.glyphOrder = list(new_glyph_order)
+
+              # MachikoProp用の半角英数字＋合字の「精密プロポーショナル化」パディング処理
               if not is_mono:
-                  for g_name in v_font['hmtx'].metrics.keys():
-                      target_g_name = g_name
-                      if len(g_name) == 1 and 0x0020 <= ord(g_name) <= 0x007E:
-                          target_g_name = out_cmap.get(ord(g_name), g_name)
-                          
-                      g_obj = out_glyf[target_g_name]
+                  for g_name in out_font.getGlyphOrder():
+                      # 追加した日本語グリフ（ja_）は処理済みのためスキップ
+                      if g_name.startswith("ja_"): continue
+                      
+                      g_obj = out_glyf[g_name]
                       if g_obj.numberOfContours == 0 or not hasattr(g_obj, 'xMin'): continue
                       g_x_min, g_x_max = g_obj.xMin, g_obj.xMax
                       actual_w = g_x_max - g_x_min
                       if actual_w <= 0: continue
                       
+                      # 1000UPEMに対し左右各30EM（計60EM）の余白を持たせ、綺麗にプロポーショナル配置
                       pad = int(out_upem * 0.06) 
                       new_w = actual_w + pad
                       new_lsb = pad // 2
@@ -172,12 +173,12 @@ jobs:
                           for i in range(len(g_obj.coordinates)):
                               cx, cy = g_obj.coordinates[i]
                               g_obj.coordinates[i] = (cx + int(shift_x), cy)
-                      out_hmtx.metrics[target_g_name] = (new_w, new_lsb)
+                      out_hmtx.metrics[g_name] = (new_w, new_lsb)
                       
-              for table_tag in ['GSUB', 'GDEF', 'GPOS']:
-                  if table_tag in v_font: out_font[table_tag] = v_font[table_tag]
-              v_font.close()
+              # 日本語ソース（ja_font）の回収クリーンアップ
+              ja_font.close()
               
+              # メタデータおよびセキュアなネーミングテーブル処理
               full_name = f"{brand_family} {style_str}"
               postscript_name = f"{brand_family}-{style_str}"
               uniq_id = f"1.000;UKWN;{postscript_name}"
