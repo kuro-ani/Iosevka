@@ -33,7 +33,6 @@ jobs:
       - run: xxd -r -p zen_hex.txt > ./ZenMaruGothic-Light.ttf
       - if: steps.cache-iosevka.outputs.cache-hit != 'true'
         run: |
-          # 🛠️ 入れ替えのcpコマンドを完全排除。統合されたTOMLからそのまま2つのターゲットをクリーンに順次ビルド
           npm run build -- 'ttf::IosevkaCustom'
           npm run build -- 'ttf::IosevkaProp'
       - name: Create Machiko Fonts
@@ -47,107 +46,80 @@ jobs:
           from fontTools.pens.transformPen import TransformPen
           from fontTools.pens.ttGlyphPen import TTGlyphPen
           from fontTools.pens.recordingPen import DecomposingRecordingPen
-          
           ja_font_path = "ZenMaruGothic-Light.ttf"
           built_files = glob.glob("dist/**/*.ttf", recursive=True)
           os.makedirs("dist_machiko", exist_ok=True)
           MONO_SHRINK_RATIO = float(os.environ.get("MONO_RATIO", 0.92))
           PROP_SCALE_X_RATIO = float(os.environ.get("PROP_RATIO", 0.80))
-          
           for ttf_path in built_files:
               if "node_modules" in ttf_path: continue
               filename = os.path.basename(ttf_path)
               if "IosevkaCustom" in filename: base_key, brand_family, is_mono, current_ratio = "IosevkaCustom", "MachikoMono", True, MONO_SHRINK_RATIO
               elif "IosevkaProp" in filename: base_key, brand_family, is_mono, current_ratio = "IosevkaProp", "MachikoProp", False, PROP_SCALE_X_RATIO
               else: continue
-              
               is_bold = "Bold" in filename
               style_str = "Bold" if is_bold else "Regular"
               machiko_path = os.path.join("dist_machiko", filename.replace(base_key, brand_family))
-              
               out_font = TTFont(ttf_path)
               out_cmap = out_font['cmap'].getBestCmap()
               out_hmtx = out_font['hmtx']
               out_glyf = out_font['glyf']
               out_upem = out_font['head'].unitsPerEm
-              
               ja_font = TTFont(ja_font_path)
               ja_cmap = ja_font['cmap'].getBestCmap()
               ja_hmtx = ja_font['hmtx']
               ja_glyf = ja_font['glyf']
               ja_glyph_set = ja_font.getGlyphSet()
               ja_upem = ja_font['head'].unitsPerEm
-              
               em_scale = out_upem / ja_upem
               iosevka_half_width, _ = out_hmtx.metrics.get('A', (500, 0))
               target_ja_width = int(iosevka_half_width * 5 / 3)
               out_glyph_set = out_font.getGlyphSet()
-              
               new_glyph_order = list(out_font.getGlyphOrder())
-              
               for code, j_g_name in ja_cmap.items():
                   if code < 0x007F: continue
-                  
                   unique_ja_g_name = f"ja_{j_g_name}"
-                  if unique_ja_g_name not in new_glyph_order:
-                      new_glyph_order.append(unique_ja_g_name)
-                  if unique_ja_g_name not in out_hmtx.metrics:
-                      out_hmtx.metrics[unique_ja_g_name] = (0, 0)
-                      
+                  if unique_ja_g_name not in new_glyph_order: new_glyph_order.append(unique_ja_g_name)
+                  if unique_ja_g_name not in out_hmtx.metrics: out_hmtx.metrics[unique_ja_g_name] = (0, 0)
                   v_w, v_l = ja_hmtx.metrics[j_g_name]
                   orig_glyph = ja_glyf[j_g_name]
-                  
                   if orig_glyph.numberOfContours == 0 or not hasattr(orig_glyph, 'xMin'):
                       out_hmtx.metrics[unique_ja_g_name] = (target_ja_width if is_mono else int(v_w * em_scale * current_ratio), 0)
                       out_glyf[unique_ja_g_name] = orig_glyph
                       for table in out_font['cmap'].tables: table.cmap[code] = unique_ja_g_name
                       continue
-                      
                   orig_x_min, orig_x_max = orig_glyph.xMin, orig_glyph.xMax
                   orig_content_width = orig_x_max - orig_x_min
                   if orig_content_width <= 0: orig_content_width, orig_x_min = v_w, 0
-                  
                   center_x = (orig_x_min + orig_x_max) / 2
-                  
                   if is_mono:
                       scale_x = (target_ja_width * current_ratio) / (orig_content_width * em_scale)
                       calc_width = target_ja_width
                   else:
                       scale_x = current_ratio
                       calc_width = int(v_w * em_scale * current_ratio)
-                      
                   offset_x = (calc_width / 2) - (center_x * em_scale * scale_x)
                   target_lsb = orig_x_min * em_scale * scale_x + offset_x
-                  
                   rec_pen = DecomposingRecordingPen(ja_glyph_set)
                   ja_glyph_set[j_g_name].draw(rec_pen)
                   t_pen = TTGlyphPen(out_glyph_set)
                   trans_pen = TransformPen(t_pen, (em_scale * scale_x, 0.0, 0.0, em_scale, offset_x, 0.0))
                   rec_pen.replay(trans_pen)
-                  
                   out_glyf[unique_ja_g_name] = t_pen.glyph()
                   out_hmtx.metrics[unique_ja_g_name] = (calc_width, int(target_lsb))
                   for table in out_font['cmap'].tables: table.cmap[code] = unique_ja_g_name
-              # 登録簿の更新をマスターに確定適用
               out_font.setGlyphOrder(new_glyph_order)
-              if hasattr(out_hmtx, 'glyphOrder'):
-                  out_hmtx.glyphOrder = list(new_glyph_order)
-
-              # 日本語ソース（ja_font）の回収クリーンアップ
+              if hasattr(out_hmtx, 'glyphOrder'): out_hmtx.glyphOrder = list(new_glyph_order)
               ja_font.close()
-              
-              # メタデータおよびセキュアなネーミングテーブル処理
               full_name = f"{brand_family} {style_str}"
               postscript_name = f"{brand_family}-{style_str}"
               uniq_id = f"1.000;UKWN;{postscript_name}"
-              
               out_font['name'].names = []
               name_data = {1: brand_family, 2: style_str, 3: uniq_id, 4: full_name, 6: postscript_name}
               for nid, text_val in name_data.items():
                   out_font['name'].setName(text_val, nid, 3, 1, 0x0411)
                   out_font['name'].setName(text_val, nid, 3, 1, 0x0409)
                   out_font['name'].setName(text_val, nid, 1, 0, 0)
-                  
               if 'OS/2' in out_font:
                   out_font['OS/2'].usWeightClass = 700 if is_bold else 400
                   out_font['OS/2'].ulCodePageRange1 |= 0x00020001
@@ -156,22 +128,13 @@ jobs:
                       out_font['OS/2'].panose.bFamilyType = 2
                       out_font['OS/2'].panose.bSerifStyle = 11
                       out_font['OS/2'].panose.bProportion = 3 if is_mono else 0
-                  
-                  # 全グリフ（長体化した日本語を含む）のリアルな幅から平均文字幅（xAvgCharWidth）を再計算
                   valid_widths = [w for w, _ in out_hmtx.metrics.values() if w > 0]
-                  if valid_widths:
-                      out_font['OS/2'].xAvgCharWidth = int(sum(valid_widths) / len(valid_widths))
-                      
-              if 'post' in out_font: 
-                  out_font['post'].isFixedPitch = 1 if is_mono else 0
-                  
-              if is_mono and 'hhea' in out_font: 
-                  out_font['hhea'].advanceWidthMax = target_ja_width
-                  
+                  if valid_widths: out_font['OS/2'].xAvgCharWidth = int(sum(valid_widths) / len(valid_widths))
+              if 'post' in out_font: out_font['post'].isFixedPitch = 1 if is_mono else 0
+              if is_mono and 'hhea' in out_font: out_font['hhea'].advanceWidthMax = target_ja_width
               out_font.save(machiko_path)
               out_font.close()
               print(f"Generated: {machiko_path}")
-              
       - name: Upload Both Artifacts
         uses: actions/upload-artifact@v4
         with:
