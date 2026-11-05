@@ -67,14 +67,12 @@ jobs:
               style_str = "Bold" if is_bold else "Regular"
               machiko_path = os.path.join("dist_machiko", filename.replace(base_key, brand_family))
               
-              # 🛠️ 【核心】Iosevka側をマスターフォント（加工ベース）として読み込む
               out_font = TTFont(ttf_path)
               out_cmap = out_font['cmap'].getBestCmap()
               out_hmtx = out_font['hmtx']
               out_glyf = out_font['glyf']
               out_upem = out_font['head'].unitsPerEm
               
-              # 日本語側をマージ元（データ抽出元）とする
               ja_font = TTFont(ja_font_path)
               ja_cmap = ja_font['cmap'].getBestCmap()
               ja_hmtx = ja_font['hmtx']
@@ -86,7 +84,7 @@ jobs:
               iosevka_half_width, _ = out_hmtx.metrics.get('A', (500, 0))
               target_ja_width = int(iosevka_half_width * 5 / 3)
               out_glyph_set = out_font.getGlyphSet()
-              # 🛠️ 新規追加する日本語グリフ名を公式登録簿（Glyph Order）へ追加するための準備
+              # 新規追加する日本語グリフ名を公式登録簿（Glyph Order）へ追加するための準備
               new_glyph_order = list(out_font.getGlyphOrder())
               
               # Iosevkaのcmapテーブルに日本語をインジェクトするための辞書オブジェクトを取得
@@ -109,9 +107,11 @@ jobs:
                   v_w, v_l = ja_hmtx.metrics[j_g_name]
                   orig_glyph = ja_glyf[j_g_name]
                   
-                  # 空白グリフ等の境界データを持たない文字の文字幅を処理
+                  # 🛠️ 核心修正：空白グリフ等の境界データを持たない文字の処理
                   if orig_glyph.numberOfContours == 0 or not hasattr(orig_glyph, 'xMin'):
                       out_hmtx.metrics[unique_ja_g_name] = (target_ja_width if is_mono else int(v_w * em_scale * current_ratio), 0)
+                      # glyfテーブルへ実体データを完全転写（KeyErrorを根本防衛）
+                      out_glyf[unique_ja_g_name] = orig_glyph
                       # 内部のすべてのcmapサブテーブルへ一括マッピング
                       for table in out_font['cmap'].tables: table.cmap[code] = unique_ja_g_name
                       continue
