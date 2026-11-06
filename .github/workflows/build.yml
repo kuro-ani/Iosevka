@@ -79,13 +79,13 @@ jobs:
               iosevka_char_width, _ = out_font['hmtx'].metrics.get('A', (500, 0))
               
               if is_mono:
-                  # MONO版：外枠（フォント領域）の設計値を「半角の正確な 5/3 倍」に固定
-                  target_ja_width = int(iosevka_char_width * 5 / 3)
-                  dynamic_scale_x = out_upem_scale * (target_ja_width / 1000.0) * user_ratio
+                  # MONO版：外枠（フォント領域）を完璧な「半角の5/3倍」の固定値に定義
+                  calc_width = int(iosevka_char_width * 5 / 3)
+                  # 輪郭の縮小率。中央寄せバグを排除するため、5/3倍の枠に100%同調させる
+                  dynamic_scale_x = out_upem_scale * (calc_width / 1000.0) * user_ratio
               else:
-                  # Prop版：Iosevka Prop Custom 側の仕様に従う
                   dynamic_scale_x = out_upem_scale * ((iosevka_char_width * 2) / 1000.0) * user_ratio
-                  target_ja_width = int(1000 * dynamic_scale_x)
+                  calc_width = int(1000 * dynamic_scale_x)
                   
               out_glyph_set = out_font.getGlyphSet()
               new_glyph_order = list(out_font.getGlyphOrder())
@@ -96,11 +96,11 @@ jobs:
                   v_w, v_l = ja_hmtx.metrics[j_g_name]
                   orig_glyph = ja_glyf[j_g_name]
                   
-                  # 確定した外枠の幅（MONO版は 5/3倍、Prop版は可変縮小幅）を厳密に定義
-                  calc_width = target_ja_width if is_mono else int(v_w * dynamic_scale_x)
+                  # Prop版は従来どおり「文字ごとの可変縮小幅」を維持
+                  glyph_width = calc_width if is_mono else int(v_w * dynamic_scale_x)
                   
                   if orig_glyph.numberOfContours == 0 or not hasattr(orig_glyph, 'xMin'):
-                      final_hmtx_metrics[unique_ja_g_name] = (calc_width, 0)
+                      final_hmtx_metrics[unique_ja_g_name] = (glyph_width, 0)
                       out_glyf[unique_ja_g_name] = orig_glyph
                       for table in out_font['cmap'].tables: table.cmap[code] = unique_ja_g_name
                       continue
@@ -108,9 +108,16 @@ jobs:
                   orig_x_min, orig_x_max = orig_glyph.xMin, orig_glyph.xMax
                   orig_content_width = orig_x_max - orig_x_min
                   if orig_content_width <= 0: orig_content_width, orig_x_min = v_w, 0
-                  center_x = (orig_x_min + orig_x_max) / 2
-                  offset_x = (calc_width / 2) - (center_x * dynamic_scale_x)
-                  target_lsb = int(orig_x_min * dynamic_scale_x + offset_x)
+                  
+                  if is_mono:
+                      # MONO版限定：不自然に文字が縮む中央寄せを完全廃止し、左側余白（LSB）の比率を外枠縮小率と完全に1対1で同期
+                      target_lsb = int(v_l * dynamic_scale_x)
+                      offset_x = target_lsb - (orig_x_min * dynamic_scale_x)
+                  else:
+                      # Prop版：満足されている従来の中央寄せロジックを1ミリも変えずに100%維持
+                      center_x = (orig_x_min + orig_x_max) / 2
+                      offset_x = (glyph_width / 2) - (center_x * dynamic_scale_x)
+                      target_lsb = int(orig_x_min * dynamic_scale_x + offset_x)
                   
                   rec_pen = DecomposingRecordingPen(ja_glyph_set)
                   ja_glyph_set[j_g_name].draw(rec_pen)
@@ -119,8 +126,7 @@ jobs:
                   rec_pen.replay(trans_pen)
                   out_glyf[unique_ja_g_name] = t_pen.glyph()
                   
-                  # 👈【重要箇所の修正】MONO版は 5/3 倍の幅、Prop版は可変幅データを外枠（hmtx）へ正確に格納
-                  final_hmtx_metrics[unique_ja_g_name] = (calc_width, target_lsb)
+                  final_hmtx_metrics[unique_ja_g_name] = (glyph_width, target_lsb)
                   for table in out_font['cmap'].tables: table.cmap[code] = unique_ja_g_name
               
               out_font.setGlyphOrder(new_glyph_order)
@@ -142,10 +148,17 @@ jobs:
                       out_font['OS/2'].panose.bFamilyType = 2
                       out_font['OS/2'].panose.bSerifStyle = 11
                       out_font['OS/2'].panose.bProportion = 3 if is_mono else 0
-                  valid_widths = [w for w, _ in final_hmtx_metrics.values() if w > 0]
-                  if valid_widths: out_font['OS/2'].xAvgCharWidth = int(sum(valid_widths) / len(valid_widths))
+                  
+                  # 👈【TOML完全同期ハック】
+                  # MONO版の時は、平均文字幅をIosevka本来の「完全な半角等幅値」に強制固定
+                  # これにより、TOMLのShape 400設計がそのままピクセル等倍で完全に画面に反映されます
+                  if is_mono:
+                      out_font['OS/2'].xAvgCharWidth = iosevka_char_width
+                  else:
+                      valid_widths = [w for w, _ in final_hmtx_metrics.values() if w > 0]
+                      if valid_widths: out_font['OS/2'].xAvgCharWidth = int(sum(valid_widths) / len(valid_widths))
               if 'post' in out_font: out_font['post'].isFixedPitch = 1 if is_mono else 0
-              if is_mono and 'hhea' in out_font: out_font['hhea'].advanceWidthMax = target_ja_width
+              if is_mono and 'hhea' in out_font: out_font['hhea'].advanceWidthMax = calc_width
               
               new_hmtx = table__h_m_t_x()
               new_hmtx.metrics = final_hmtx_metrics
