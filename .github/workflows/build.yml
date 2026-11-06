@@ -79,10 +79,10 @@ jobs:
               iosevka_char_width, _ = out_font['hmtx'].metrics.get('A', (500, 0))
               
               if is_mono:
-                  # MONO版：システムに等幅認識させるため外枠は厳密な「半角の2倍（1:2）」に定義
+                  # MONO版：システムに1:2の等幅として100%誤認させるため、外枠データは「完全な2倍」にする
                   calc_width = int(iosevka_char_width * 2)
-                  # 👈【左寄せ・右空白完全粉砕】文字の輪郭データだけを「3:5（5/6倍）」ベースで綺麗に引き締める縮小率
-                  dynamic_scale_x = out_upem_scale * (calc_width / 1000.0) * (5 / 6) * user_ratio
+                  # 👈【3:5調和設計】実際の文字の輪郭データだけを、正確に半角の「5/3倍」のサイズに長体化させる
+                  dynamic_scale_x = out_upem_scale * ((iosevka_char_width * 5 / 3) / 1000.0) * user_ratio
               else:
                   dynamic_scale_x = out_upem_scale * ((iosevka_char_width * 2) / 1000.0) * user_ratio
                   calc_width = int(1000 * dynamic_scale_x)
@@ -96,7 +96,7 @@ jobs:
                   v_w, v_l = ja_hmtx.metrics[j_g_name]
                   orig_glyph = ja_glyf[j_g_name]
                   
-                  # 混入バグを防止：日本語インジェクト時のみ calc_width を適用
+                  # 混入バグを防止：日本語インジェクト時のみ、上記の等幅制御幅を適用
                   glyph_width = calc_width if is_mono else int(v_w * dynamic_scale_x)
                   
                   if orig_glyph.numberOfContours == 0 or not hasattr(orig_glyph, 'xMin'):
@@ -108,17 +108,13 @@ jobs:
                   orig_x_min, orig_x_max = orig_glyph.xMin, orig_glyph.xMax
                   orig_content_width = orig_x_max - orig_x_min
                   if orig_content_width <= 0: orig_content_width, orig_x_min = v_w, 0
+                  center_x = (orig_x_min + orig_x_max) / 2
                   
-                  if is_mono:
-                      # 👈【MONO版限定：アフィン変換のズレを完全修正】
-                      # 左寄せバグの原因だった中央寄せ計算を完全廃止し、左側余白（LSB）の比率を縮小倍率と1対1で完全同期
-                      target_lsb = int(v_l * dynamic_scale_x)
-                      offset_x = target_lsb - (orig_x_min * dynamic_scale_x)
-                  else:
-                      # Prop版：満足されている従来の中央寄せロジックを完全保護（1ミリも変えません）
-                      center_x = (orig_x_min + orig_x_max) / 2
-                      offset_x = (glyph_width / 2) - (center_x * dynamic_scale_x)
-                      target_lsb = int(orig_x_min * dynamic_scale_x + offset_x)
+                  # 👈【中央寄せ配置の完全修正】
+                  # MONO版は「2倍の等幅外枠（calc_width）」の完全にど真ん中に「5/3倍の文字データ」を配置するため、
+                  # 左側ギチギチ・右側大空白の不整合が消滅し、完璧な均等マージンになります。
+                  offset_x = (glyph_width / 2) - (center_x * dynamic_scale_x)
+                  target_lsb = int(orig_x_min * dynamic_scale_x + offset_x)
                   
                   rec_pen = DecomposingRecordingPen(ja_glyph_set)
                   ja_glyph_set[j_g_name].draw(rec_pen)
@@ -149,8 +145,6 @@ jobs:
                       out_font['OS/2'].panose.bFamilyType = 2
                       out_font['OS/2'].panose.bSerifStyle = 11
                       out_font['OS/2'].panose.bProportion = 3 if is_mono else 0
-                  
-                  # 前回の半角破壊バグを修正：全グリフの平均幅を正しく再コンピュート
                   valid_widths = [w for w, _ in final_hmtx_metrics.values() if w > 0]
                   if valid_widths: out_font['OS/2'].xAvgCharWidth = int(sum(valid_widths) / len(valid_widths))
               if 'post' in out_font: out_font['post'].isFixedPitch = 1 if is_mono else 0
