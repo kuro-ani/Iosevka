@@ -130,22 +130,18 @@ jobs:
                   if hasattr(out_font['OS/2'], 'panose'):
                       out_font['OS/2'].panose.bFamilyType = 2
                       out_font['OS/2'].panose.bSerifStyle = 11
-                      out_font['OS/2'].panose.bProportion = 3 if is_mono else 0
-                  if is_mono:
-                      out_font['OS/2'].xAvgCharWidth = iosevka_char_width
-                  else:
-                      valid_widths = [w for w, _ in final_hmtx_metrics.values() if w > 0]
-                      if valid_widths: out_font['OS/2'].xAvgCharWidth = int(sum(valid_widths) / len(valid_widths))
-              if 'post' in out_font: out_font['post'].isFixedPitch = 1 if is_mono else 0
+                      # レンダーによる強制等幅グリッド制限（間延びの主犯）を解除するため、Prop版と同調させる
+                      out_font['OS/2'].panose.bProportion = 0
+                  valid_widths = [w for w, _ in final_hmtx_metrics.values() if w > 0]
+                  if valid_widths: out_font['OS/2'].xAvgCharWidth = int(sum(valid_widths) / len(valid_widths))
+              
+              # 【決定的修正】「真の等幅」フラグをあえて0にし、エディタの強制引き伸ばし回路を完全粉砕
+              if 'post' in out_font: out_font['post'].isFixedPitch = 0
               
               if 'hhea' in out_font:
-                  if is_mono:
-                      out_font['hhea'].advanceWidthMax = target_ja_width
-                      out_font['hhea'].numberOfHMetrics = len(new_glyph_order)
-                      out_font['hhea'].minLeftSideBearing = 0
-
-              if is_mono and 'GDEF' in out_font:
-                  del out_font['GDEF']
+                  # 個別のメトリクス（半角3:全角5）をシステムに100%そのまま認識させる設定
+                  out_font['hhea'].numberOfHMetrics = len(new_glyph_order)
+                  out_font['hhea'].advanceWidthMax = max(final_hmtx_metrics.values(), key=lambda m: m[0])[0]
 
               new_hmtx = table__h_m_t_x()
               new_hmtx.metrics = final_hmtx_metrics
@@ -156,29 +152,6 @@ jobs:
               
               out_font.save(machiko_path)
               out_font.close()
-              
-              if is_mono:
-                  fix_font = TTFont(machiko_path)
-                  actual_order = fix_font.getGlyphOrder()
-                  remapped_metrics = {}
-                  for idx, current_name in enumerate(actual_order):
-                      if idx < len(new_glyph_order):
-                          orig_name = new_glyph_order[idx]
-                          if orig_name in final_hmtx_metrics:
-                              remapped_metrics[current_name] = final_hmtx_metrics[orig_name]
-                  
-                  if hasattr(fix_font['hmtx'], 'metrics'): del fix_font['hmtx'].metrics
-                  if hasattr(fix_font['hmtx'], 'compiled'): del fix_font['hmtx'].compiled
-                  fix_font['hmtx'].metrics = remapped_metrics
-                  if 'hhea' in fix_font:
-                      fix_font['hhea'].numberOfHMetrics = len(actual_order)
-                      fix_font['hhea'].advanceWidthMax = target_ja_width
-                  if 'vmtx' in fix_font: del fix_font['vmtx']
-                  if 'vhea' in fix_font: del fix_font['vhea']
-                  fix_font['hmtx'].compile = lambda self: table__h_m_t_x.compile(fix_font['hmtx'], self)
-                  fix_font.save(machiko_path)
-                  fix_font.close()
-                  
               print(f"Generated: {machiko_path}")
 
       - name: Upload Both Artifacts
