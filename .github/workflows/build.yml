@@ -79,11 +79,11 @@ jobs:
               iosevka_char_width, _ = out_font['hmtx'].metrics.get('A', (500, 0))
               
               if is_mono:
-                  # メトリクス上の外枠（フォント領域）を完璧な「半角の5/3倍」に固定
+                  # MONO版：外枠（フォント領域）の設計値を「半角の正確な 5/3 倍」に固定
                   target_ja_width = int(iosevka_char_width * 5 / 3)
-                  # 輪郭の縮小率。元の全角幅(1000)に対する比率を厳密に計算
                   dynamic_scale_x = out_upem_scale * (target_ja_width / 1000.0) * user_ratio
               else:
+                  # Prop版：Iosevka Prop Custom 側の仕様に従う
                   dynamic_scale_x = out_upem_scale * ((iosevka_char_width * 2) / 1000.0) * user_ratio
                   target_ja_width = int(1000 * dynamic_scale_x)
                   
@@ -96,19 +96,21 @@ jobs:
                   v_w, v_l = ja_hmtx.metrics[j_g_name]
                   orig_glyph = ja_glyf[j_g_name]
                   
+                  # 確定した外枠の幅（MONO版は 5/3倍、Prop版は可変縮小幅）を厳密に定義
+                  calc_width = target_ja_width if is_mono else int(v_w * dynamic_scale_x)
+                  
                   if orig_glyph.numberOfContours == 0 or not hasattr(orig_glyph, 'xMin'):
-                      final_hmtx_metrics[unique_ja_g_name] = (target_ja_width, 0)
+                      final_hmtx_metrics[unique_ja_g_name] = (calc_width, 0)
                       out_glyf[unique_ja_g_name] = orig_glyph
                       for table in out_font['cmap'].tables: table.cmap[code] = unique_ja_g_name
                       continue
                       
-                  orig_x_min = orig_glyph.xMin
-                  calc_width = target_ja_width
-                  
-                  # 👈【物理的余白同期ハック】
-                  # 文字を中央寄せするのではなく、元のフォントの左側余白（LSB）の比率を厳密に維持して縮小・配置する
-                  target_lsb = int(v_l * dynamic_scale_x)
-                  offset_x = target_lsb - (orig_x_min * dynamic_scale_x)
+                  orig_x_min, orig_x_max = orig_glyph.xMin, orig_glyph.xMax
+                  orig_content_width = orig_x_max - orig_x_min
+                  if orig_content_width <= 0: orig_content_width, orig_x_min = v_w, 0
+                  center_x = (orig_x_min + orig_x_max) / 2
+                  offset_x = (calc_width / 2) - (center_x * dynamic_scale_x)
+                  target_lsb = int(orig_x_min * dynamic_scale_x + offset_x)
                   
                   rec_pen = DecomposingRecordingPen(ja_glyph_set)
                   ja_glyph_set[j_g_name].draw(rec_pen)
@@ -116,6 +118,8 @@ jobs:
                   trans_pen = TransformPen(t_pen, (dynamic_scale_x, 0.0, 0.0, out_upem_scale, offset_x, 0.0))
                   rec_pen.replay(trans_pen)
                   out_glyf[unique_ja_g_name] = t_pen.glyph()
+                  
+                  # 👈【重要箇所の修正】MONO版は 5/3 倍の幅、Prop版は可変幅データを外枠（hmtx）へ正確に格納
                   final_hmtx_metrics[unique_ja_g_name] = (calc_width, target_lsb)
                   for table in out_font['cmap'].tables: table.cmap[code] = unique_ja_g_name
               
@@ -137,25 +141,15 @@ jobs:
                   if hasattr(out_font['OS/2'], 'panose'):
                       out_font['OS/2'].panose.bFamilyType = 2
                       out_font['OS/2'].panose.bSerifStyle = 11
-                      # Mono版は等幅（3）、Prop版は可変幅（0）として完璧に分離
                       out_font['OS/2'].panose.bProportion = 3 if is_mono else 0
                   valid_widths = [w for w, _ in final_hmtx_metrics.values() if w > 0]
                   if valid_widths: out_font['OS/2'].xAvgCharWidth = int(sum(valid_widths) / len(valid_widths))
-                      
-              # Mono版は厳密な等幅フォント（isFixedPitch=1）のアイデンティティを完全復元
               if 'post' in out_font: out_font['post'].isFixedPitch = 1 if is_mono else 0
+              if is_mono and 'hhea' in out_font: out_font['hhea'].advanceWidthMax = target_ja_width
               
-              if 'hhea' in out_font:
-                  out_font['hhea'].advanceWidthMax = max(final_hmtx_metrics.values(), key=lambda m: m)
-                  # fontToolsに勝手にhmtxデータを省略（圧縮リセット）させないため、全グリフ数を固定指定
-                  out_font['hhea'].numberOfHMetrics = len(new_glyph_order)
-
               new_hmtx = table__h_m_t_x()
               new_hmtx.metrics = final_hmtx_metrics
               out_font['hmtx'] = new_hmtx
-              
-              if hasattr(out_font['hmtx'], 'compiled'):
-                  del out_font['hmtx'].compiled
               
               out_font.save(machiko_path)
               out_font.close()
