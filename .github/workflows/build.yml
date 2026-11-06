@@ -79,11 +79,13 @@ jobs:
               iosevka_char_width, _ = out_font['hmtx'].metrics.get('A', (500, 0))
               
               if is_mono:
-                  target_ja_width = int(iosevka_char_width * 5 / 3)
-                  dynamic_scale_x = out_upem_scale * (target_ja_width / 1000.0) * user_ratio
+                  # MONO版：システムに等幅認識させるため外枠は厳密な「半角の2倍（1:2）」に定義
+                  calc_width = int(iosevka_char_width * 2)
+                  # 👈【左寄せ・右空白完全粉砕】文字の輪郭データだけを「3:5（5/6倍）」ベースで綺麗に引き締める縮小率
+                  dynamic_scale_x = out_upem_scale * (calc_width / 1000.0) * (5 / 6) * user_ratio
               else:
                   dynamic_scale_x = out_upem_scale * ((iosevka_char_width * 2) / 1000.0) * user_ratio
-                  target_ja_width = int(1000 * dynamic_scale_x)
+                  calc_width = int(1000 * dynamic_scale_x)
                   
               out_glyph_set = out_font.getGlyphSet()
               new_glyph_order = list(out_font.getGlyphOrder())
@@ -94,12 +96,11 @@ jobs:
                   v_w, v_l = ja_hmtx.metrics[j_g_name]
                   orig_glyph = ja_glyf[j_g_name]
                   
-                  # 👈【半角・全角の完全分離修正】
-                  # Mono版かつ日本語インジェクト時のみ target_ja_width (5/3倍) を適用し、それ以外（Prop版や元の半角文字）は元の計算値を維持
-                  calc_width = target_ja_width if is_mono else int(v_w * dynamic_scale_x)
+                  # 混入バグを防止：日本語インジェクト時のみ calc_width を適用
+                  glyph_width = calc_width if is_mono else int(v_w * dynamic_scale_x)
                   
                   if orig_glyph.numberOfContours == 0 or not hasattr(orig_glyph, 'xMin'):
-                      final_hmtx_metrics[unique_ja_g_name] = (calc_width, 0)
+                      final_hmtx_metrics[unique_ja_g_name] = (glyph_width, 0)
                       out_glyf[unique_ja_g_name] = orig_glyph
                       for table in out_font['cmap'].tables: table.cmap[code] = unique_ja_g_name
                       continue
@@ -107,9 +108,17 @@ jobs:
                   orig_x_min, orig_x_max = orig_glyph.xMin, orig_glyph.xMax
                   orig_content_width = orig_x_max - orig_x_min
                   if orig_content_width <= 0: orig_content_width, orig_x_min = v_w, 0
-                  center_x = (orig_x_min + orig_x_max) / 2
-                  offset_x = (calc_width / 2) - (center_x * dynamic_scale_x)
-                  target_lsb = int(orig_x_min * dynamic_scale_x + offset_x)
+                  
+                  if is_mono:
+                      # 👈【MONO版限定：アフィン変換のズレを完全修正】
+                      # 左寄せバグの原因だった中央寄せ計算を完全廃止し、左側余白（LSB）の比率を縮小倍率と1対1で完全同期
+                      target_lsb = int(v_l * dynamic_scale_x)
+                      offset_x = target_lsb - (orig_x_min * dynamic_scale_x)
+                  else:
+                      # Prop版：満足されている従来の中央寄せロジックを完全保護（1ミリも変えません）
+                      center_x = (orig_x_min + orig_x_max) / 2
+                      offset_x = (glyph_width / 2) - (center_x * dynamic_scale_x)
+                      target_lsb = int(orig_x_min * dynamic_scale_x + offset_x)
                   
                   rec_pen = DecomposingRecordingPen(ja_glyph_set)
                   ja_glyph_set[j_g_name].draw(rec_pen)
@@ -118,7 +127,7 @@ jobs:
                   rec_pen.replay(trans_pen)
                   out_glyf[unique_ja_g_name] = t_pen.glyph()
                   
-                  final_hmtx_metrics[unique_ja_g_name] = (calc_width, target_lsb)
+                  final_hmtx_metrics[unique_ja_g_name] = (glyph_width, target_lsb)
                   for table in out_font['cmap'].tables: table.cmap[code] = unique_ja_g_name
               
               out_font.setGlyphOrder(new_glyph_order)
@@ -141,12 +150,11 @@ jobs:
                       out_font['OS/2'].panose.bSerifStyle = 11
                       out_font['OS/2'].panose.bProportion = 3 if is_mono else 0
                   
-                  # 👈【最重要】元の半角Iosevka文字の幅データ(final_hmtx_metrics内の元の文字)を破壊しないよう、
-                  # OS/2テーブルの平均文字幅（xAvgCharWidth）を厳密に計算し直して保存
+                  # 前回の半角破壊バグを修正：全グリフの平均幅を正しく再コンピュート
                   valid_widths = [w for w, _ in final_hmtx_metrics.values() if w > 0]
                   if valid_widths: out_font['OS/2'].xAvgCharWidth = int(sum(valid_widths) / len(valid_widths))
               if 'post' in out_font: out_font['post'].isFixedPitch = 1 if is_mono else 0
-              if is_mono and 'hhea' in out_font: out_font['hhea'].advanceWidthMax = target_ja_width
+              if is_mono and 'hhea' in out_font: out_font['hhea'].advanceWidthMax = calc_width
               
               new_hmtx = table__h_m_t_x()
               new_hmtx.metrics = final_hmtx_metrics
