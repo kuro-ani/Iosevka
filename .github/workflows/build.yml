@@ -79,7 +79,7 @@ jobs:
               iosevka_char_width, _ = out_font['hmtx'].metrics.get('A', (500, 0))
               
               if is_mono:
-                  # メトリクス（外枠のフォント領域）を完璧な「半角の5/3倍」の固定値に指定
+                  # 【確定的メトリクス設計】フォント外枠領域自体を完璧な「半角の5/3倍」で敷き詰める
                   target_ja_width = int(iosevka_char_width * 5 / 3)
                   dynamic_scale_x = out_upem_scale * (target_ja_width / 1000.0) * user_ratio
               else:
@@ -133,36 +133,24 @@ jobs:
                   if hasattr(out_font['OS/2'], 'panose'):
                       out_font['OS/2'].panose.bFamilyType = 2
                       out_font['OS/2'].panose.bSerifStyle = 11
-                      # Mono版本来の等幅属性（3: Monospace）を完全に維持
-                      out_font['OS/2'].panose.bProportion = 3 if is_mono else 0
+                      # CJK等幅フォントとしての最新の標準規格である「9: Monospace」を指定
+                      out_font['OS/2'].panose.bProportion = 9 if is_mono else 0
                   valid_widths = [w for w, _ in final_hmtx_metrics.values() if w > 0]
                   if valid_widths: out_font['OS/2'].xAvgCharWidth = int(sum(valid_widths) / len(valid_widths))
                       
-              # Mono版本来の等幅フラグを100%維持
-              if 'post' in out_font: out_font['post'].isFixedPitch = 1 if is_mono else 0
+              # 【超重要】古い時代の厳密等幅（全グリフ同一幅）フラグを0にして、fontToolsの強制丸め込みを完全回避
+              # これにより「半角3:全角5」という2つの等幅ピッチが完全に共存できるようになります
+              if 'post' in out_font: out_font['post'].isFixedPitch = 0
               
               if 'hhea' in out_font:
-                  out_font['hhea'].advanceWidthMax = max(final_hmtx_metrics.values(), key=lambda m: m[0])[0]
-                  if is_mono:
-                      # fontToolsの内部自動削減を上書きするため、全グリフ数を明示的に指定
-                      out_font['hhea'].numberOfHMetrics = len(new_glyph_order)
+                  out_font['hhea'].advanceWidthMax = max(final_hmtx_metrics.values(), key=lambda m: m)
+                  # 全文字に正確な外枠データを保持させるため、省略を行わせない
+                  out_font['hhea'].numberOfHMetrics = len(new_glyph_order)
 
-              # 新造したhmtxオブジェクトを注入
               new_hmtx = table__h_m_t_x()
               new_hmtx.metrics = final_hmtx_metrics
               out_font['hmtx'] = new_hmtx
               
-              # 【核心ハック】save()の瞬間にfontToolsの内部コンパイラが等幅最適化で
-              # numberOfHMetricsを勝手に書き換えてhmtxを丸め込む挙動を完全にオーバーライド（無効化）する
-              if is_mono:
-                  orig_compile = out_font['hmtx'].compile
-                  def safe_compile(ttFont):
-                      # fontToolsがhmtxをコンパイルした直後に、hheaの数値を全グリフ数に強制再同期
-                      data = orig_compile(ttFont)
-                      ttFont['hhea'].numberOfHMetrics = len(ttFont.getGlyphOrder())
-                      return data
-                  out_font['hmtx'].compile = safe_compile
-
               if hasattr(out_font['hmtx'], 'compiled'):
                   del out_font['hmtx'].compiled
               
