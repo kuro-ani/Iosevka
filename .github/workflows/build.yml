@@ -78,8 +78,11 @@ jobs:
               out_upem_scale = out_upem / ja_upem
               iosevka_char_width, _ = out_font['hmtx'].metrics.get('A', (500, 0))
               
+              # 元の半角グリフの総数を正確に記録
+              num_half_glyphs = len(out_font.getGlyphOrder())
+              
               if is_mono:
-                  # MONO版：外枠（フォント領域）の幅を、ユーザー指定の可変値（user_ratio）を反映させた完璧な「5/3倍」に動的決定
+                  # MONO版：外枠（フォント領域）自体を user_ratio に連動させて動的に決定
                   target_ja_width = int((iosevka_char_width * 5 / 3) * user_ratio)
                   dynamic_scale_x = out_upem_scale * (target_ja_width / 1000.0)
               else:
@@ -88,14 +91,18 @@ jobs:
                   
               out_glyph_set = out_font.getGlyphSet()
               new_glyph_order = list(out_font.getGlyphOrder())
+              
+              # 日本語グリフの一時格納用リスト
+              ja_glyphs_added = []
+              
               for code, j_g_name in ja_cmap.items():
                   if code < 0x007F: continue
                   unique_ja_g_name = f"ja_{j_g_name}"
-                  if unique_ja_g_name not in new_glyph_order: new_glyph_order.append(unique_ja_g_name)
+                  if unique_ja_g_name not in ja_glyphs_added:
+                      ja_glyphs_added.append(unique_ja_g_name)
                   v_w, v_l = ja_hmtx.metrics[j_g_name]
                   orig_glyph = ja_glyf[j_g_name]
                   
-                  # 日本語グリフ追加時のみ、上記の計算幅（MONO版は5/3倍可変、Prop版は従来通り）を適用
                   calc_width = target_ja_width if is_mono else int(v_w * dynamic_scale_x)
                   
                   if orig_glyph.numberOfContours == 0 or not hasattr(orig_glyph, 'xMin'):
@@ -109,7 +116,6 @@ jobs:
                   if orig_content_width <= 0: orig_content_width, orig_x_min = v_w, 0
                   center_x = (orig_x_min + orig_x_max) / 2
                   
-                  # 引き締まった外枠のど真ん中に、日本語の文字形状を左右均等アキで中央配置
                   offset_x = (calc_width / 2) - (center_x * dynamic_scale_x)
                   target_lsb = int(orig_x_min * dynamic_scale_x + offset_x)
                   
@@ -123,8 +129,11 @@ jobs:
                   final_hmtx_metrics[unique_ja_g_name] = (calc_width, target_lsb)
                   for table in out_font['cmap'].tables: table.cmap[code] = unique_ja_g_name
               
-              out_font.setGlyphOrder(new_glyph_order)
+              # 👈【厳密等幅整列ハック】
+              # グリフの並び順を「[元の半角すべて] ＋ [追加した全角日本語すべて]」に完全再編成
+              out_font.setGlyphOrder(new_glyph_order + ja_glyphs_added)
               ja_font.close()
+              
               full_name = f"{brand_family} {style_str}"
               postscript_name = f"{brand_family}-{style_str}"
               uniq_id = f"1.000;UKWN;{postscript_name}"
@@ -141,26 +150,19 @@ jobs:
                   if hasattr(out_font['OS/2'], 'panose'):
                       out_font['OS/2'].panose.bFamilyType = 2
                       out_font['OS/2'].panose.bSerifStyle = 11
-                      # 👈【等幅認識の標準規格】
-                      # MONO版は「9: Monospace（等幅）」を明示的に指定。これでシステムに等幅フォントとして公式登録されます。
-                      out_font['OS/2'].panose.bProportion = 9 if is_mono else 0
-                  
-                  # TOMLのShape 400設計を100%シャープに保つため、平均幅を半角基準で完全固定
-                  if is_mono:
-                      out_font['OS/2'].xAvgCharWidth = iosevka_char_width
-                  else:
-                      valid_widths = [w for w, _ in final_hmtx_metrics.values() if w > 0]
-                      if valid_widths: out_font['OS/2'].xAvgCharWidth = int(sum(valid_widths) / len(valid_widths))
-                      
-              # 👈【最重要：等幅強制丸め込みの完全解除】
-              # 古い時代の厳密等幅（全グリフ同一幅）フラグを0にすることで、レンダラーの「全角＝2倍マス強制配置」を解除します。
-              # PANOSE=9の効果により、アプリ上では等幅フォントとして登録されつつ、3:5の正確な外枠がそのまま画面に出力されます。
-              if 'post' in out_font: out_font['post'].isFixedPitch = 0
+                      out_font['OS/2'].panose.bProportion = 3 if is_mono else 0
+                  valid_widths = [w for w, _ in final_hmtx_metrics.values() if w > 0]
+                  if valid_widths: out_font['OS/2'].xAvgCharWidth = int(sum(valid_widths) / len(valid_widths))
+              if 'post' in out_font: out_font['post'].isFixedPitch = 1 if is_mono else 0
               
               if 'hhea' in out_font:
                   out_font['hhea'].advanceWidthMax = max(final_hmtx_metrics.values(), key=lambda m: m)
-                  # 全文字に正確な3:5の外枠データを保持させるため、省略を行わせない
-                  out_font['hhea'].numberOfHMetrics = len(new_glyph_order)
+                  if is_mono:
+                      # 👈【数理規格の完全同調】
+                      # 等幅フォントの「異なる幅の境界ルール」に厳密に準拠するため、
+                      # numberOfHMetricsの値を「半角グリフの総数 ＋ 1」に完全に同期設定する。
+                      # これによりWindowsでの破損エラーを完全に防ぎつつ、日本語の幅データを100%生存させます。
+                      out_font['hhea'].numberOfHMetrics = num_half_glyphs + 1
 
               new_hmtx = table__h_m_t_x()
               new_hmtx.metrics = final_hmtx_metrics
