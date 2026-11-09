@@ -79,13 +79,12 @@ jobs:
               iosevka_char_width, _ = out_font['hmtx'].metrics.get('A', (500, 0))
               
               if is_mono:
-                  # MONO版：システムに1:2の等幅として100%誤認させるため、外枠データは「完全な2倍」にする
-                  calc_width = int(iosevka_char_width * 2)
-                  # 👈【3:5調和設計】実際の文字の輪郭データだけを、正確に半角の「5/3倍」のサイズに長体化させる
-                  dynamic_scale_x = out_upem_scale * ((iosevka_char_width * 5 / 3) / 1000.0) * user_ratio
+                  # MONO版：システムに等幅認識させるため、全体の基準外枠は「完全な2倍」にする
+                  target_ja_width = int(iosevka_char_width * 2)
               else:
-                  dynamic_scale_x = out_upem_scale * ((iosevka_char_width * 2) / 1000.0) * user_ratio
-                  calc_width = int(1000 * dynamic_scale_x)
+                  # Prop版の共通幅計算（従来通り変更なし）
+                  prop_scale_x = out_upem_scale * ((iosevka_char_width * 2) / 1000.0) * user_ratio
+                  target_ja_width = int(1000 * prop_scale_x)
                   
               out_glyph_set = out_font.getGlyphSet()
               new_glyph_order = list(out_font.getGlyphOrder())
@@ -96,11 +95,17 @@ jobs:
                   v_w, v_l = ja_hmtx.metrics[j_g_name]
                   orig_glyph = ja_glyf[j_g_name]
                   
-                  # 混入バグを防止：日本語インジェクト時のみ、上記の等幅制御幅を適用
-                  glyph_width = calc_width if is_mono else int(v_w * dynamic_scale_x)
+                  # 👈【日本語専用スコープ】文字の変形倍率をインジェクトする日本語側だけで個別計算
+                  if is_mono:
+                      calc_width = target_ja_width
+                      # 実際の日本語データだけを正確に半角の「5/3倍」のサイズに長体化させる
+                      dynamic_scale_x = out_upem_scale * ((iosevka_char_width * 5 / 3) / 1000.0) * user_ratio
+                  else:
+                      dynamic_scale_x = out_upem_scale * ((iosevka_char_width * 2) / 1000.0) * user_ratio
+                      calc_width = int(v_w * dynamic_scale_x)
                   
                   if orig_glyph.numberOfContours == 0 or not hasattr(orig_glyph, 'xMin'):
-                      final_hmtx_metrics[unique_ja_g_name] = (glyph_width, 0)
+                      final_hmtx_metrics[unique_ja_g_name] = (calc_width, 0)
                       out_glyf[unique_ja_g_name] = orig_glyph
                       for table in out_font['cmap'].tables: table.cmap[code] = unique_ja_g_name
                       continue
@@ -110,10 +115,8 @@ jobs:
                   if orig_content_width <= 0: orig_content_width, orig_x_min = v_w, 0
                   center_x = (orig_x_min + orig_x_max) / 2
                   
-                  # 👈【中央寄せ配置の完全修正】
-                  # MONO版は「2倍の等幅外枠（calc_width）」の完全にど真ん中に「5/3倍の文字データ」を配置するため、
-                  # 左側ギチギチ・右側大空白の不整合が消滅し、完璧な均等マージンになります。
-                  offset_x = (glyph_width / 2) - (center_x * dynamic_scale_x)
+                  # 2倍の外枠の真ん中に、5/3倍に縮小された日本語の墨データを左右均等マージンで配置
+                  offset_x = (calc_width / 2) - (center_x * dynamic_scale_x)
                   target_lsb = int(orig_x_min * dynamic_scale_x + offset_x)
                   
                   rec_pen = DecomposingRecordingPen(ja_glyph_set)
@@ -123,7 +126,7 @@ jobs:
                   rec_pen.replay(trans_pen)
                   out_glyf[unique_ja_g_name] = t_pen.glyph()
                   
-                  final_hmtx_metrics[unique_ja_g_name] = (glyph_width, target_lsb)
+                  final_hmtx_metrics[unique_ja_g_name] = (calc_width, target_lsb)
                   for table in out_font['cmap'].tables: table.cmap[code] = unique_ja_g_name
               
               out_font.setGlyphOrder(new_glyph_order)
@@ -148,7 +151,7 @@ jobs:
                   valid_widths = [w for w, _ in final_hmtx_metrics.values() if w > 0]
                   if valid_widths: out_font['OS/2'].xAvgCharWidth = int(sum(valid_widths) / len(valid_widths))
               if 'post' in out_font: out_font['post'].isFixedPitch = 1 if is_mono else 0
-              if is_mono and 'hhea' in out_font: out_font['hhea'].advanceWidthMax = calc_width
+              if is_mono and 'hhea' in out_font: out_font['hhea'].advanceWidthMax = target_ja_width
               
               new_hmtx = table__h_m_t_x()
               new_hmtx.metrics = final_hmtx_metrics
