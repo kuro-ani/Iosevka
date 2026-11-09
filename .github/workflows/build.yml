@@ -78,19 +78,14 @@ jobs:
               out_upem_scale = out_upem / ja_upem
               iosevka_char_width, _ = out_font['hmtx'].metrics.get('A', (500, 0))
               
-              # 【数理設計の完全同調】
-              # 等幅システム（1:2）を黙らせるため、外枠データは完璧な「半角の2倍」に完全固定
-              calc_width = int(iosevka_char_width * 2)
-              
               if is_mono:
-                  # 👈【Mono版の縮小倍率バグを完全粉砕】
-                  # Prop版が成功している「完全な2倍マス（iosevka_char_width * 2）」の縮小倍率をベースにし、
-                  # そこからダイレクトに「3:5の比率（5/6倍）」へ長体化させ、user_ratio(0.92)を掛け合わせる。
-                  # これにより、文字がペシャンコに自爆する回路が完全に停止します！
-                  dynamic_scale_x = out_upem_scale * (calc_width / 1000.0) * (5 / 6) * user_ratio
+                  # MONO版：システムに等幅認識させるため、外枠データは「完全な2倍」にする
+                  calc_width = int(iosevka_char_width * 2)
+                  # 👈【真の数理同期】1000.0を完全消去し、フォント本来の解像度（out_upem）を基準に3:5（5/6倍）にする
+                  dynamic_scale_x = out_upem_scale * (calc_width / float(out_upem)) * (5 / 6) * user_ratio
               else:
-                  # Prop版：完璧に成功しているオリジナルの縮小計算を1ミリも変えずに100%維持
-                  dynamic_scale_x = out_upem_scale * (calc_width / 1000.0) * user_ratio
+                  dynamic_scale_x = out_upem_scale * ((iosevka_char_width * 2) / 1000.0) * user_ratio
+                  calc_width = int(1000 * dynamic_scale_x)
                   
               out_glyph_set = out_font.getGlyphSet()
               new_glyph_order = list(out_font.getGlyphOrder())
@@ -101,7 +96,7 @@ jobs:
                   v_w, v_l = ja_hmtx.metrics[j_g_name]
                   orig_glyph = ja_glyf[j_g_name]
                   
-                  # 日本語グリフ追加時のみ、上記の等幅制御幅（2倍固定）を外枠として代入
+                  # 日本語グリフ追加時のみ、上記の等幅制御幅（2倍固定）を外枠として適用
                   glyph_width = calc_width if is_mono else int(v_w * dynamic_scale_x)
                   
                   if orig_glyph.numberOfContours == 0 or not hasattr(orig_glyph, 'xMin'):
