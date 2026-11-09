@@ -49,11 +49,7 @@ jobs:
           from fontTools.pens.ttGlyphPen import TTGlyphPen
           from fontTools.pens.recordingPen import DecomposingRecordingPen
           from fontTools.ttLib.tables._h_m_t_x import table__h_m_t_x
-          
-          # 👈【真のバグ修正】xxdが書き出したルート直下のファイルを絶対パスで確実に指定
-          root_dir = os.getcwd()
-          ja_font_path = os.path.join(root_dir, "ZenMaruGothic-Light.ttf")
-          
+          ja_font_path = "ZenMaruGothic-Light.ttf"
           built_files = glob.glob("dist/**/*.ttf", recursive=True)
           os.makedirs("dist_machiko", exist_ok=True)
           MONO_SHRINK_RATIO = float(os.environ.get("MONO_RATIO", 0.92))
@@ -61,34 +57,18 @@ jobs:
           for ttf_path in built_files:
               if "node_modules" in ttf_path: continue
               filename = os.path.basename(ttf_path)
-              
-              try:
-                  test_font = TTFont(ttf_path)
-                  font_family_internal = test_font['name'].getDebugName(1)
-                  test_font.close()
-              except:
-                  continue
-                  
-              if "Prop" in font_family_internal:
-                  base_key, brand_family, is_mono, user_ratio = "IosevkaProp", "MachikoProp", False, PROP_SCALE_X_RATIO
-              elif "Iosevka" in font_family_internal:
-                  base_key, brand_family, is_mono, user_ratio = "IosevkaCustom", "MachikoMono", True, MONO_SHRINK_RATIO
-              else:
-                  continue
-                  
+              if "IosevkaCustom" in filename: base_key, brand_family, is_mono, user_ratio = "IosevkaCustom", "MachikoMono", True, MONO_SHRINK_RATIO
+              elif "IosevkaProp" in filename: base_key, brand_family, is_mono, user_ratio = "IosevkaProp", "MachikoProp", False, PROP_SCALE_X_RATIO
+              else: continue
               is_bold = "Bold" in filename
               style_str = "Bold" if is_bold else "Regular"
-              
-              out_filename = filename.replace("Iosevka_Prop_Custom", "MachikoProp").replace("Iosevka_Custom", "MachikoMono").replace("IosevkaProp", "MachikoProp").replace("IosevkaCustom", "MachikoMono")
-              machiko_path = os.path.join("dist_machiko", out_filename)
-              
+              machiko_path = os.path.join("dist_machiko", filename.replace(base_key, brand_family))
               out_font = TTFont(ttf_path)
               out_cmap = out_font['cmap'].getBestCmap()
               out_glyf = out_font['glyf']
               out_upem = out_font['head'].unitsPerEm
               final_hmtx_metrics = {}
               for k, v in out_font['hmtx'].metrics.items(): final_hmtx_metrics[k] = v
-              
               ja_font = TTFont(ja_font_path)
               ja_cmap = ja_font['cmap'].getBestCmap()
               ja_hmtx = ja_font['hmtx']
@@ -99,9 +79,9 @@ jobs:
               iosevka_char_width, _ = out_font['hmtx'].metrics.get('A', (500, 0))
               
               if is_mono:
-                  # MONO版：外枠（フォント領域）の幅を、ユーザー指定の可変値（user_ratio）を反映させた完璧な「5/3倍」に動的決定
-                  target_ja_width = int((iosevka_char_width * 5 / 3) * user_ratio)
-                  dynamic_scale_x = out_upem_scale * (target_ja_width / 1000.0)
+                  # MONO版：外枠の幅を半角文字幅の正確な「5/3倍」に規定
+                  target_ja_width = int(iosevka_char_width * 5 / 3)
+                  dynamic_scale_x = out_upem_scale * (target_ja_width / 1000.0) * user_ratio
               else:
                   dynamic_scale_x = out_upem_scale * ((iosevka_char_width * 2) / 1000.0) * user_ratio
                   target_ja_width = int(1000 * dynamic_scale_x)
@@ -115,6 +95,9 @@ jobs:
                   v_w, v_l = ja_hmtx.metrics[j_g_name]
                   orig_glyph = ja_glyf[j_g_name]
                   
+                  # 👈【代入バグの完全修正】
+                  # Mono版の時は絶対に上書きさせずに、一律「target_ja_width（5/3倍固定幅）」を適用。
+                  # Zen丸ゴシック側の可変幅（v_w）を完全に遮断します。
                   calc_width = target_ja_width if is_mono else int(v_w * dynamic_scale_x)
                   
                   if orig_glyph.numberOfContours == 0 or not hasattr(orig_glyph, 'xMin'):
@@ -122,15 +105,12 @@ jobs:
                       out_glyf[unique_ja_g_name] = orig_glyph
                       for table in out_font['cmap'].tables: table.cmap[code] = unique_ja_g_name
                       continue
-                      
                   orig_x_min, orig_x_max = orig_glyph.xMin, orig_glyph.xMax
                   orig_content_width = orig_x_max - orig_x_min
                   if orig_content_width <= 0: orig_content_width, orig_x_min = v_w, 0
                   center_x = (orig_x_min + orig_x_max) / 2
-                  
                   offset_x = (calc_width / 2) - (center_x * dynamic_scale_x)
                   target_lsb = int(orig_x_min * dynamic_scale_x + offset_x)
-                  
                   rec_pen = DecomposingRecordingPen(ja_glyph_set)
                   ja_glyph_set[j_g_name].draw(rec_pen)
                   t_pen = TTGlyphPen(out_font.getGlyphSet())
@@ -138,10 +118,14 @@ jobs:
                   rec_pen.replay(trans_pen)
                   out_glyf[unique_ja_g_name] = t_pen.glyph()
                   
+                  # 👈 正しく修正された 5/3 倍の固定幅が外枠（hmtx）に確実に格納されます
                   final_hmtx_metrics[unique_ja_g_name] = (calc_width, target_lsb)
                   for table in out_font['cmap'].tables: table.cmap[code] = unique_ja_g_name
-              
+                  
               out_font.setGlyphOrder(new_glyph_order)
+              new_hmtx = table__h_m_t_x()
+              new_hmtx.metrics = final_hmtx_metrics
+              out_font['hmtx'] = new_hmtx
               ja_font.close()
               full_name = f"{brand_family} {style_str}"
               postscript_name = f"{brand_family}-{style_str}"
@@ -164,11 +148,6 @@ jobs:
                   if valid_widths: out_font['OS/2'].xAvgCharWidth = int(sum(valid_widths) / len(valid_widths))
               if 'post' in out_font: out_font['post'].isFixedPitch = 1 if is_mono else 0
               if is_mono and 'hhea' in out_font: out_font['hhea'].advanceWidthMax = target_ja_width
-              
-              new_hmtx = table__h_m_t_x()
-              new_hmtx.metrics = final_hmtx_metrics
-              out_font['hmtx'] = new_hmtx
-              
               out_font.save(machiko_path)
               out_font.close()
               print(f"Generated: {machiko_path}")
