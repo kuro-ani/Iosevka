@@ -49,7 +49,11 @@ jobs:
           from fontTools.pens.ttGlyphPen import TTGlyphPen
           from fontTools.pens.recordingPen import DecomposingRecordingPen
           from fontTools.ttLib.tables._h_m_t_x import table__h_m_t_x
-          ja_font_path = "ZenMaruGothic-Light.ttf"
+          
+          # 👈【真のバグ修正】xxdが書き出したルート直下のファイルを絶対パスで確実に指定
+          root_dir = os.getcwd()
+          ja_font_path = os.path.join(root_dir, "ZenMaruGothic-Light.ttf")
+          
           built_files = glob.glob("dist/**/*.ttf", recursive=True)
           os.makedirs("dist_machiko", exist_ok=True)
           MONO_SHRINK_RATIO = float(os.environ.get("MONO_RATIO", 0.92))
@@ -84,6 +88,7 @@ jobs:
               out_upem = out_font['head'].unitsPerEm
               final_hmtx_metrics = {}
               for k, v in out_font['hmtx'].metrics.items(): final_hmtx_metrics[k] = v
+              
               ja_font = TTFont(ja_font_path)
               ja_cmap = ja_font['cmap'].getBestCmap()
               ja_hmtx = ja_font['hmtx']
@@ -94,7 +99,7 @@ jobs:
               iosevka_char_width, _ = out_font['hmtx'].metrics.get('A', (500, 0))
               
               if is_mono:
-                  # TOMLの spacing = "term" と連動させ、外枠の箱（アドバンス幅）を完璧な「5/3倍可変」にする
+                  # MONO版：外枠（フォント領域）の幅を、ユーザー指定の可変値（user_ratio）を反映させた完璧な「5/3倍」に動的決定
                   target_ja_width = int((iosevka_char_width * 5 / 3) * user_ratio)
                   dynamic_scale_x = out_upem_scale * (target_ja_width / 1000.0)
               else:
