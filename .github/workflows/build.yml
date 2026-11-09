@@ -79,10 +79,8 @@ jobs:
               iosevka_char_width, _ = out_font['hmtx'].metrics.get('A', (500, 0))
               
               if is_mono:
-                  # MONO版：システムに等幅認識させるため、全体の基準外枠は「完全な2倍」にする
-                  target_ja_width = int(iosevka_char_width * 2)
+                  target_ja_width = int(iosevka_char_width * 5 / 3)
               else:
-                  # Prop版の共通幅計算（従来通り変更なし）
                   prop_scale_x = out_upem_scale * ((iosevka_char_width * 2) / 1000.0) * user_ratio
                   target_ja_width = int(1000 * prop_scale_x)
                   
@@ -95,11 +93,9 @@ jobs:
                   v_w, v_l = ja_hmtx.metrics[j_g_name]
                   orig_glyph = ja_glyf[j_g_name]
                   
-                  # 👈【日本語専用スコープ】文字の変形倍率をインジェクトする日本語側だけで個別計算
                   if is_mono:
                       calc_width = target_ja_width
-                      # 実際の日本語データだけを正確に半角の「5/3倍」のサイズに長体化させる
-                      dynamic_scale_x = out_upem_scale * ((iosevka_char_width * 5 / 3) / 1000.0) * user_ratio
+                      dynamic_scale_x = out_upem_scale * (target_ja_width / 1000.0) * user_ratio
                   else:
                       dynamic_scale_x = out_upem_scale * ((iosevka_char_width * 2) / 1000.0) * user_ratio
                       calc_width = int(v_w * dynamic_scale_x)
@@ -114,8 +110,6 @@ jobs:
                   orig_content_width = orig_x_max - orig_x_min
                   if orig_content_width <= 0: orig_content_width, orig_x_min = v_w, 0
                   center_x = (orig_x_min + orig_x_max) / 2
-                  
-                  # 2倍の外枠の真ん中に、5/3倍に縮小された日本語の墨データを左右均等マージンで配置
                   offset_x = (calc_width / 2) - (center_x * dynamic_scale_x)
                   target_lsb = int(orig_x_min * dynamic_scale_x + offset_x)
                   
@@ -157,8 +151,30 @@ jobs:
               new_hmtx.metrics = final_hmtx_metrics
               out_font['hmtx'] = new_hmtx
               
+              # 1パス目：通常保存
               out_font.save(machiko_path)
               out_font.close()
+              
+              # 2パス目：【Mono版限定・右側巨大余白完全トリミングハック】
+              # 保存されたバイナリを開き直し、自動コンパイルの影響を受けない独立した状態でヘッダー数値を直撃書き換え
+              if is_mono:
+                  fix_font = TTFont(machiko_path)
+                  
+                  # フォント全体の最大文字幅（hheaテーブル）が日本語の元の巨大な値にリセットされるのを防ぎ、
+                  # Iosevka本来の正確な半角等幅幅に強制差し戻し
+                  if 'hhea' in fix_font:
+                      fix_font['hhea'].advanceWidthMax = iosevka_char_width
+                      # システム側による省略リセットを無効化するため、全文字に独立したメトリクスを強制適用
+                      fix_font['hhea'].numberOfHMetrics = len(fix_font.getGlyphOrder())
+                  
+                  # OS/2テーブルの平均文字幅（xAvgCharWidth）を日本語込みの巨大な平均値から、
+                  # TOMLのShape 400指定をシャープに維持するIosevka本来の半角幅に完全固定
+                  if 'OS/2' in fix_font:
+                      fix_font['OS/2'].xAvgCharWidth = iosevka_char_width
+                  
+                  fix_font.save(machiko_path)
+                  fix_font.close()
+                  
               print(f"Generated: {machiko_path}")
 
       - name: Upload Both Artifacts
