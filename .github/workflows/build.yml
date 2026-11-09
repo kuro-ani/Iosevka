@@ -79,12 +79,11 @@ jobs:
               iosevka_char_width, _ = out_font['hmtx'].metrics.get('A', (500, 0))
               
               if is_mono:
-                  # MONO版：外枠（フォント領域）自体を user_ratio に連動させて動的に決定
-                  target_ja_width = int((iosevka_char_width * 5 / 3) * user_ratio)
-                  dynamic_scale_x = out_upem_scale * (target_ja_width / 1000.0)
+                  # 👈【真の等幅偽装】システムを黙らせるため、外枠データは完璧な「半角の2倍（1:2）」に完全固定
+                  target_ja_width = int(iosevka_char_width * 2)
               else:
-                  dynamic_scale_x = out_upem_scale * ((iosevka_char_width * 2) / 1000.0) * user_ratio
-                  target_ja_width = int(1000 * dynamic_scale_x)
+                  prop_scale_x = out_upem_scale * ((iosevka_char_width * 2) / 1000.0) * user_ratio
+                  target_ja_width = int(1000 * prop_scale_x)
                   
               out_glyph_set = out_font.getGlyphSet()
               new_glyph_order = list(out_font.getGlyphOrder())
@@ -95,8 +94,8 @@ jobs:
                   v_w, v_l = ja_hmtx.metrics[j_g_name]
                   orig_glyph = ja_glyf[j_g_name]
                   
-                  # 日本語グリフ追加時のみ、動的同期幅（target_ja_width）を適用
-                  calc_width = target_ja_width if is_mono else int(v_w * dynamic_scale_x)
+                  # 日本語グリフ追加時のみ、上記の等幅制御幅（2倍固定）を外枠として適用
+                  calc_width = target_ja_width if is_mono else int(v_w * prop_scale_x)
                   
                   if orig_glyph.numberOfContours == 0 or not hasattr(orig_glyph, 'xMin'):
                       final_hmtx_metrics[unique_ja_g_name] = (calc_width, 0)
@@ -109,7 +108,14 @@ jobs:
                   if orig_content_width <= 0: orig_content_width, orig_x_min = v_w, 0
                   center_x = (orig_x_min + orig_x_max) / 2
                   
-                  # 5/3×user_ratio倍に引き締まった外枠のど真ん中に、日本語の墨データを左右均等に配置
+                  if is_mono:
+                      # 👈【3:5調和変形演算】
+                      # 日本語の実際の輪郭データ（墨）だけを、正確に半角の「5/3倍」の細さになるように長体化
+                      dynamic_scale_x = out_upem_scale * ((iosevka_char_width * 5 / 3) / 1000.0) * user_ratio
+                  else:
+                      dynamic_scale_x = prop_scale_x
+                  
+                  # 2倍の外枠の真ん中に、5/3倍に縮小された日本語の文字形状を、左右均等アキで中央配置
                   offset_x = (calc_width / 2) - (center_x * dynamic_scale_x)
                   target_lsb = int(orig_x_min * dynamic_scale_x + offset_x)
                   
@@ -150,22 +156,6 @@ jobs:
               new_hmtx = table__h_m_t_x()
               new_hmtx.metrics = final_hmtx_metrics
               out_font['hmtx'] = new_hmtx
-              
-              # 👈【等幅バイナリ制約・完全突破クロージャハック】
-              # save()を実行するまさにその瞬間に、fontToolsがhmtxテーブルをバイナリ（Raw Data）化した後、
-              # hhea.numberOfHMetricsの数値を強制的に全グリフ数に書き戻してファイルに直結させます。
-              # これにより、OSのインストールチェックを正常に通過させつつ、個別幅データの消滅を防ぎます。
-              if is_mono:
-                  orig_hmtx_compile = out_font['hmtx'].compile
-                  def safe_hmtx_compile(ttFont):
-                      raw_data = orig_hmtx_compile(ttFont)
-                      # fontToolsがhmtxをバイナリ化した直後、hheaの丸め込み処理の裏をかいて全グリフ数を再代入
-                      ttFont['hhea'].numberOfHMetrics = len(ttFont.getGlyphOrder())
-                      return raw_data
-                  out_font['hmtx'].compile = safe_hmtx_compile
-
-              if hasattr(out_font['hmtx'], 'compiled'):
-                  del out_font['hmtx'].compiled
               
               out_font.save(machiko_path)
               out_font.close()
