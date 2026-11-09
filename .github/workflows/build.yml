@@ -79,9 +79,8 @@ jobs:
               iosevka_char_width, _ = out_font['hmtx'].metrics.get('A', (500, 0))
               
               if is_mono:
-                  # 👈【動的完全同期設計】外枠（フォント領域）自体を user_ratio に連動させて動的に決定
+                  # MONO版：外枠（フォント領域）自体を user_ratio に連動させて動的に決定
                   target_ja_width = int((iosevka_char_width * 5 / 3) * user_ratio)
-                  # 文字の輪郭の縮小倍率も、この縮んだ外枠に1対1で完璧に同期（余計な隙間を生まない）
                   dynamic_scale_x = out_upem_scale * (target_ja_width / 1000.0)
               else:
                   dynamic_scale_x = out_upem_scale * ((iosevka_char_width * 2) / 1000.0) * user_ratio
@@ -96,7 +95,7 @@ jobs:
                   v_w, v_l = ja_hmtx.metrics[j_g_name]
                   orig_glyph = ja_glyf[j_g_name]
                   
-                  # Mono版は、上記の動的同期幅（target_ja_width）をそのまま外枠に直結
+                  # 日本語グリフ追加時のみ、動的同期幅（target_ja_width）を適用
                   calc_width = target_ja_width if is_mono else int(v_w * dynamic_scale_x)
                   
                   if orig_glyph.numberOfContours == 0 or not hasattr(orig_glyph, 'xMin'):
@@ -110,7 +109,7 @@ jobs:
                   if orig_content_width <= 0: orig_content_width, orig_x_min = v_w, 0
                   center_x = (orig_x_min + orig_x_max) / 2
                   
-                  # 動的に引き締まった外枠（calc_width）に対して、中身の文字をど真ん中に中央寄せ配置
+                  # 5/3×user_ratio倍に引き締まった外枠のど真ん中に、日本語の墨データを左右均等に配置
                   offset_x = (calc_width / 2) - (center_x * dynamic_scale_x)
                   target_lsb = int(orig_x_min * dynamic_scale_x + offset_x)
                   
@@ -151,6 +150,22 @@ jobs:
               new_hmtx = table__h_m_t_x()
               new_hmtx.metrics = final_hmtx_metrics
               out_font['hmtx'] = new_hmtx
+              
+              # 👈【等幅バイナリ制約・完全突破クロージャハック】
+              # save()を実行するまさにその瞬間に、fontToolsがhmtxテーブルをバイナリ（Raw Data）化した後、
+              # hhea.numberOfHMetricsの数値を強制的に全グリフ数に書き戻してファイルに直結させます。
+              # これにより、OSのインストールチェックを正常に通過させつつ、個別幅データの消滅を防ぎます。
+              if is_mono:
+                  orig_hmtx_compile = out_font['hmtx'].compile
+                  def safe_hmtx_compile(ttFont):
+                      raw_data = orig_hmtx_compile(ttFont)
+                      # fontToolsがhmtxをバイナリ化した直後、hheaの丸め込み処理の裏をかいて全グリフ数を再代入
+                      ttFont['hhea'].numberOfHMetrics = len(ttFont.getGlyphOrder())
+                      return raw_data
+                  out_font['hmtx'].compile = safe_hmtx_compile
+
+              if hasattr(out_font['hmtx'], 'compiled'):
+                  del out_font['hmtx'].compiled
               
               out_font.save(machiko_path)
               out_font.close()
