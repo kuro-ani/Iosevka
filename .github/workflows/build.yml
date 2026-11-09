@@ -58,7 +58,6 @@ jobs:
               if "node_modules" in ttf_path: continue
               filename = os.path.basename(ttf_path)
               
-              # 一度フォントを読み込み、内部のファミリー名（Family Name）から厳密にプランを識別する
               try:
                   test_font = TTFont(ttf_path)
                   font_family_internal = test_font['name'].getDebugName(1)
@@ -66,7 +65,6 @@ jobs:
               except:
                   continue
                   
-              # 👈【条件分岐の確実な修正】内部ファミリー名に "Prop" が入っているかどうかで厳密に棲み分ける
               if "Prop" in font_family_internal:
                   base_key, brand_family, is_mono, user_ratio = "IosevkaProp", "MachikoProp", False, PROP_SCALE_X_RATIO
               elif "Iosevka" in font_family_internal:
@@ -77,7 +75,6 @@ jobs:
               is_bold = "Bold" in filename
               style_str = "Bold" if is_bold else "Regular"
               
-              # 出力ファイル名は元の命名規則（Iosevka_Custom 等）を MachikoMono/Prop に置換
               out_filename = filename.replace("Iosevka_Prop_Custom", "MachikoProp").replace("Iosevka_Custom", "MachikoMono").replace("IosevkaProp", "MachikoProp").replace("IosevkaCustom", "MachikoMono")
               machiko_path = os.path.join("dist_machiko", out_filename)
               
@@ -97,12 +94,12 @@ jobs:
               iosevka_char_width, _ = out_font['hmtx'].metrics.get('A', (500, 0))
               
               if is_mono:
-                  # MONO版：外枠（フォント領域）を完璧な「半角の正確な 5/3 倍」に指定
-                  calc_width = int(iosevka_char_width * 5 / 3)
-                  dynamic_scale_x = out_upem_scale * (calc_width / 1000.0) * user_ratio
+                  # TOMLの spacing = "term" と連動させ、外枠の箱（アドバンス幅）を完璧な「5/3倍可変」にする
+                  target_ja_width = int((iosevka_char_width * 5 / 3) * user_ratio)
+                  dynamic_scale_x = out_upem_scale * (target_ja_width / 1000.0)
               else:
                   dynamic_scale_x = out_upem_scale * ((iosevka_char_width * 2) / 1000.0) * user_ratio
-                  calc_width = int(1000 * dynamic_scale_x)
+                  target_ja_width = int(1000 * dynamic_scale_x)
                   
               out_glyph_set = out_font.getGlyphSet()
               new_glyph_order = list(out_font.getGlyphOrder())
@@ -113,11 +110,10 @@ jobs:
                   v_w, v_l = ja_hmtx.metrics[j_g_name]
                   orig_glyph = ja_glyf[j_g_name]
                   
-                  # Mono版は、上記の「半角5/3倍固定幅（calc_width）」を確実に外枠に直結
-                  glyph_width = calc_width if is_mono else int(v_w * dynamic_scale_x)
+                  calc_width = target_ja_width if is_mono else int(v_w * dynamic_scale_x)
                   
                   if orig_glyph.numberOfContours == 0 or not hasattr(orig_glyph, 'xMin'):
-                      final_hmtx_metrics[unique_ja_g_name] = (glyph_width, 0)
+                      final_hmtx_metrics[unique_ja_g_name] = (calc_width, 0)
                       out_glyf[unique_ja_g_name] = orig_glyph
                       for table in out_font['cmap'].tables: table.cmap[code] = unique_ja_g_name
                       continue
@@ -127,8 +123,7 @@ jobs:
                   if orig_content_width <= 0: orig_content_width, orig_x_min = v_w, 0
                   center_x = (orig_x_min + orig_x_max) / 2
                   
-                  # 5/3倍の外枠の真ん中に、日本語の文字形状を左右均等アキで中央配置
-                  offset_x = (glyph_width / 2) - (center_x * dynamic_scale_x)
+                  offset_x = (calc_width / 2) - (center_x * dynamic_scale_x)
                   target_lsb = int(orig_x_min * dynamic_scale_x + offset_x)
                   
                   rec_pen = DecomposingRecordingPen(ja_glyph_set)
@@ -138,7 +133,7 @@ jobs:
                   rec_pen.replay(trans_pen)
                   out_glyf[unique_ja_g_name] = t_pen.glyph()
                   
-                  final_hmtx_metrics[unique_ja_g_name] = (glyph_width, target_lsb)
+                  final_hmtx_metrics[unique_ja_g_name] = (calc_width, target_lsb)
                   for table in out_font['cmap'].tables: table.cmap[code] = unique_ja_g_name
               
               out_font.setGlyphOrder(new_glyph_order)
@@ -163,7 +158,7 @@ jobs:
                   valid_widths = [w for w, _ in final_hmtx_metrics.values() if w > 0]
                   if valid_widths: out_font['OS/2'].xAvgCharWidth = int(sum(valid_widths) / len(valid_widths))
               if 'post' in out_font: out_font['post'].isFixedPitch = 1 if is_mono else 0
-              if is_mono and 'hhea' in out_font: out_font['hhea'].advanceWidthMax = calc_width
+              if is_mono and 'hhea' in out_font: out_font['hhea'].advanceWidthMax = target_ja_width
               
               new_hmtx = table__h_m_t_x()
               new_hmtx.metrics = final_hmtx_metrics
