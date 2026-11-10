@@ -82,29 +82,31 @@ jobs:
               iosevka_char_width, _ = out_font['hmtx'].metrics.get('A', (500, 0))
               
               if is_mono:
-                  # MONO版：外枠（フォント領域）の箱の幅を完璧な「5/3倍」にガッチリ規定してハードロック代入
-                  calc_width = int(iosevka_char_width * 5 / 3)
-                  # 文字の見た目（輪郭データ）も、この5/3倍の動的枠に1対1で完璧に等倍同期（余計な隙間を生まない）
-                  dynamic_scale_x = out_upem_scale * (calc_width / 1000.0) * user_ratio
+                  # MONO版：外枠（フォント領域）のサイズをユーザー指定の可変値（user_ratio）を反映させた完璧な「5/3倍」に動的決定
+                  target_ja_width = int((iosevka_char_width * 5 / 3) * user_ratio)
+                  dynamic_scale_x = out_upem_scale * (target_ja_width / 1000.0)
               else:
-                  # Prop版：完成している中央寄せロジックを完全保護
                   dynamic_scale_x = out_upem_scale * ((iosevka_char_width * 2) / 1000.0) * user_ratio
-                  calc_width = int(1000 * dynamic_scale_x)
+                  target_ja_width = int(1000 * dynamic_scale_x)
                   
               out_glyph_set = out_font.getGlyphSet()
-              new_glyph_order = list(out_font.getGlyphOrder())
+              original_glyph_order = list(out_font.getGlyphOrder())
+              
+              # 日本語グリフの一時格納用
+              ja_glyphs_added = []
+              
               for code, j_g_name in ja_cmap.items():
                   if code < 0x007F: continue
                   unique_ja_g_name = f"ja_{j_g_name}"
-                  if unique_ja_g_name not in new_glyph_order: new_glyph_order.append(unique_ja_g_name)
+                  if unique_ja_g_name not in ja_glyphs_added:
+                      ja_glyphs_added.append(unique_ja_g_name)
                   v_w, v_l = ja_hmtx.metrics[j_g_name]
                   orig_glyph = ja_glyf[j_g_name]
                   
-                  # 日本語グリフ追加時のみ、上記の計算幅（MONO版は5/3倍固定、Prop版は可変幅）を適用
-                  glyph_width = calc_width if is_mono else int(v_w * dynamic_scale_x)
+                  calc_width = target_ja_width if is_mono else int(v_w * dynamic_scale_x)
                   
                   if orig_glyph.numberOfContours == 0 or not hasattr(orig_glyph, 'xMin'):
-                      final_hmtx_metrics[unique_ja_g_name] = (glyph_width, 0)
+                      final_hmtx_metrics[unique_ja_g_name] = (calc_width, 0)
                       out_glyf[unique_ja_g_name] = orig_glyph
                       for table in out_font['cmap'].tables: table.cmap[code] = unique_ja_g_name
                       continue
@@ -114,10 +116,7 @@ jobs:
                   if orig_content_width <= 0: orig_content_width, orig_x_min = v_w, 0
                   center_x = (orig_x_min + orig_x_max) / 2
                   
-                  # 👈【不自然なアキの分散を完全撤去】
-                  # 前回のダミー点配置バグを完全消去。5/3倍に引き締まった正規の外枠（glyph_width）の真ん中へ、
-                  # 長体化された日本語を綺麗に中央寄せ配置します。
-                  offset_x = (glyph_width / 2) - (center_x * dynamic_scale_x)
+                  offset_x = (calc_width / 2) - (center_x * dynamic_scale_x)
                   target_lsb = int(orig_x_min * dynamic_scale_x + offset_x)
                   
                   rec_pen = DecomposingRecordingPen(ja_glyph_set)
@@ -127,10 +126,17 @@ jobs:
                   rec_pen.replay(trans_pen)
                   out_glyf[unique_ja_g_name] = t_pen.glyph()
                   
-                  final_hmtx_metrics[unique_ja_g_name] = (glyph_width, target_lsb)
+                  final_hmtx_metrics[unique_ja_g_name] = (calc_width, target_lsb)
                   for table in out_font['cmap'].tables: table.cmap[code] = unique_ja_g_name
               
-              out_font.setGlyphOrder(new_glyph_order)
+              if is_mono:
+                  # 👈【3:5インデックス順序完全再編成ハック】
+                  # コンパイラの自動省略の裏をかくため、グリフの並び順を「[すべての全角日本語] ＋ [すべての元の半角]」にする。
+                  # これによりフォント全体の等幅基準が「3:5の全角幅」側に強制偽装ロックされ、個別幅データの消滅を100%防ぎます！
+                  out_font.setGlyphOrder(ja_glyphs_added + original_glyph_order)
+              else:
+                  out_font.setGlyphOrder(original_glyph_order + ja_glyphs_added)
+                  
               ja_font.close()
               full_name = f"{brand_family} {style_str}"
               postscript_name = f"{brand_family}-{style_str}"
@@ -148,23 +154,18 @@ jobs:
                   if hasattr(out_font['OS/2'], 'panose'):
                       out_font['OS/2'].panose.bFamilyType = 2
                       out_font['OS/2'].panose.bSerifStyle = 11
-                      # CJK等幅の標準規格「9: Monospace」を指定して、OSのリストに等幅として登録
-                      out_font['OS/2'].panose.bProportion = 9 if is_mono else 0
-                  
-                  if is_mono:
-                      out_font['OS/2'].xAvgCharWidth = iosevka_char_width
-                  else:
-                      valid_widths = [w for w, _ in final_hmtx_metrics.values() if w > 0]
-                      if valid_widths: out_font['OS/2'].xAvgCharWidth = int(sum(valid_widths) / len(valid_widths))
-                      
-              # 👈【最重要：エディタの強制1:2展開を完全解除】
-              # 古い等幅フラグを0にして、エディタの「右空白100（2倍マス強制配置）」を完全に粉砕。
-              # PANOSE=9の効果により、等幅フォントのアイデンティティを保ったまま、3:5のリアルな引き締め外枠を有効化させます。
-              if 'post' in out_font: out_font['post'].isFixedPitch = 0
+                      out_font['OS/2'].panose.bProportion = 3 if is_mono else 0
+                  valid_widths = [w for w, _ in final_hmtx_metrics.values() if w > 0]
+                  if valid_widths: out_font['OS/2'].xAvgCharWidth = int(sum(valid_widths) / len(valid_widths))
+              if 'post' in out_font: out_font['post'].isFixedPitch = 1 if is_mono else 0
               
               if 'hhea' in out_font:
                   out_font['hhea'].advanceWidthMax = max(final_hmtx_metrics.values(), key=lambda m: m)
-                  out_font['hhea'].numberOfHMetrics = len(new_glyph_order)
+                  if is_mono:
+                      # 👈 新しい並び順に完全同期させ、全角日本語の個別の3:5幅データを100%生存させる境界値
+                      out_font['hhea'].numberOfHMetrics = len(ja_glyphs_added) + 1
+                  else:
+                      out_font['hhea'].numberOfHMetrics = len(out_font.getGlyphOrder())
 
               new_hmtx = table__h_m_t_x()
               new_hmtx.metrics = final_hmtx_metrics
