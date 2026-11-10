@@ -49,7 +49,10 @@ jobs:
           from fontTools.pens.ttGlyphPen import TTGlyphPen
           from fontTools.pens.recordingPen import DecomposingRecordingPen
           from fontTools.ttLib.tables._h_m_t_x import table__h_m_t_x
-          ja_font_path = "ZenMaruGothic-Light.ttf"
+          
+          root_dir = os.getcwd()
+          ja_font_path = os.path.join(root_dir, "ZenMaruGothic-Light.ttf")
+          
           built_files = glob.glob("dist/**/*.ttf", recursive=True)
           os.makedirs("dist_machiko", exist_ok=True)
           MONO_SHRINK_RATIO = float(os.environ.get("MONO_RATIO", 0.92))
@@ -57,18 +60,34 @@ jobs:
           for ttf_path in built_files:
               if "node_modules" in ttf_path: continue
               filename = os.path.basename(ttf_path)
-              if "IosevkaCustom" in filename: base_key, brand_family, is_mono, user_ratio = "IosevkaCustom", "MachikoMono", True, MONO_SHRINK_RATIO
-              elif "IosevkaProp" in filename: base_key, brand_family, is_mono, user_ratio = "IosevkaProp", "MachikoProp", False, PROP_SCALE_X_RATIO
-              else: continue
+              
+              try:
+                  test_font = TTFont(ttf_path)
+                  font_family_internal = test_font['name'].getDebugName(1)
+                  test_font.close()
+              except:
+                  continue
+                  
+              if "Prop" in font_family_internal:
+                  base_key, brand_family, is_mono, user_ratio = "IosevkaProp", "MachikoProp", False, PROP_SCALE_X_RATIO
+              elif "Iosevka" in font_family_internal:
+                  base_key, brand_family, is_mono, user_ratio = "IosevkaCustom", "MachikoMono", True, MONO_SHRINK_RATIO
+              else:
+                  continue
+                  
               is_bold = "Bold" in filename
               style_str = "Bold" if is_bold else "Regular"
-              machiko_path = os.path.join("dist_machiko", filename.replace(base_key, brand_family))
+              
+              out_filename = filename.replace("Iosevka_Prop_Custom", "MachikoProp").replace("Iosevka_Custom", "MachikoMono").replace("IosevkaProp", "MachikoProp").replace("IosevkaCustom", "MachikoMono")
+              machiko_path = os.path.join("dist_machiko", out_filename)
+              
               out_font = TTFont(ttf_path)
               out_cmap = out_font['cmap'].getBestCmap()
               out_glyf = out_font['glyf']
               out_upem = out_font['head'].unitsPerEm
               final_hmtx_metrics = {}
               for k, v in out_font['hmtx'].metrics.items(): final_hmtx_metrics[k] = v
+              
               ja_font = TTFont(ja_font_path)
               ja_cmap = ja_font['cmap'].getBestCmap()
               ja_hmtx = ja_font['hmtx']
@@ -78,13 +97,9 @@ jobs:
               out_upem_scale = out_upem / ja_upem
               iosevka_char_width, _ = out_font['hmtx'].metrics.get('A', (500, 0))
               
-              if is_mono:
-                  # MONO版：外枠（フォント領域）の幅を、ユーザー指定の可変値（user_ratio）を反映させた完璧な「5/3倍」に動的決定
-                  target_ja_width = int((iosevka_char_width * 5 / 3) * user_ratio)
-                  dynamic_scale_x = out_upem_scale * (target_ja_width / 1000.0)
-              else:
-                  dynamic_scale_x = out_upem_scale * ((iosevka_char_width * 2) / 1000.0) * user_ratio
-                  target_ja_width = int(1000 * dynamic_scale_x)
+              # MONO版・Prop版ともに、文字の縮小倍率の基本を「完全な2倍（1:2）」ベースに完全同期
+              calc_width = int(iosevka_char_width * 2)
+              dynamic_scale_x = out_upem_scale * (calc_width / 1000.0) * user_ratio
                   
               out_glyph_set = out_font.getGlyphSet()
               new_glyph_order = list(out_font.getGlyphOrder())
@@ -95,11 +110,10 @@ jobs:
                   v_w, v_l = ja_hmtx.metrics[j_g_name]
                   orig_glyph = ja_glyf[j_g_name]
                   
-                  # 日本語グリフ追加時のみ、上記の計算幅を適用
-                  calc_width = target_ja_width if is_mono else int(v_w * dynamic_scale_x)
+                  glyph_width = calc_width if is_mono else int(v_w * dynamic_scale_x)
                   
                   if orig_glyph.numberOfContours == 0 or not hasattr(orig_glyph, 'xMin'):
-                      final_hmtx_metrics[unique_ja_g_name] = (calc_width, 0)
+                      final_hmtx_metrics[unique_ja_g_name] = (glyph_width, 0)
                       out_glyf[unique_ja_g_name] = orig_glyph
                       for table in out_font['cmap'].tables: table.cmap[code] = unique_ja_g_name
                       continue
@@ -107,11 +121,18 @@ jobs:
                   orig_x_min, orig_x_max = orig_glyph.xMin, orig_glyph.xMax
                   orig_content_width = orig_x_max - orig_x_min
                   if orig_content_width <= 0: orig_content_width, orig_x_min = v_w, 0
-                  center_x = (orig_x_min + orig_x_max) / 2
                   
-                  # 引き締まった外枠のど真ん中に、日本語の文字形状を左右均等アキで中央配置
-                  offset_x = (calc_width / 2) - (center_x * dynamic_scale_x)
-                  target_lsb = int(orig_x_min * dynamic_scale_x + offset_x)
+                  if is_mono:
+                      # 👈【MONO版限定：左寄せ張り付きバグの完全粉砕】
+                      # 文字の中心を動かす中央寄せ計算を完全破棄。
+                      # 元の日本語が持っていた左余白（v_l）の比率のまま縮小倍率と1対1で完全同期させる
+                      target_lsb = int(v_l * dynamic_scale_x)
+                      offset_x = target_lsb - (orig_x_min * dynamic_scale_x)
+                  else:
+                      # Prop版：完璧に大成功しているオリジナルの中央寄せ配置ロジックを完全保護
+                      center_x = (orig_x_min + orig_x_max) / 2
+                      offset_x = (glyph_width / 2) - (center_x * dynamic_scale_x)
+                      target_lsb = int(orig_x_min * dynamic_scale_x + offset_x)
                   
                   rec_pen = DecomposingRecordingPen(ja_glyph_set)
                   ja_glyph_set[j_g_name].draw(rec_pen)
@@ -120,7 +141,7 @@ jobs:
                   rec_pen.replay(trans_pen)
                   out_glyf[unique_ja_g_name] = t_pen.glyph()
                   
-                  final_hmtx_metrics[unique_ja_g_name] = (calc_width, target_lsb)
+                  final_hmtx_metrics[unique_ja_g_name] = (glyph_width, target_lsb)
                   for table in out_font['cmap'].tables: table.cmap[code] = unique_ja_g_name
               
               out_font.setGlyphOrder(new_glyph_order)
@@ -141,20 +162,16 @@ jobs:
                   if hasattr(out_font['OS/2'], 'panose'):
                       out_font['OS/2'].panose.bFamilyType = 2
                       out_font['OS/2'].panose.bSerifStyle = 11
-                      # 👈【固定ピッチフォントとして公式登録】
-                      # MONO版は最新等幅規格である「9: Monospace」を指定。これでOSの等幅リストへ完璧に登録されます。
+                      # 最新等幅規格「9: Monospace」を指定して、OSの等幅リストへ公式登録
                       out_font['OS/2'].panose.bProportion = 9 if is_mono else 0
                   
-                  # TOMLのShape 400設計を100%シャープに保つため、平均幅を半角基準で完全固定
                   if is_mono:
                       out_font['OS/2'].xAvgCharWidth = iosevka_char_width
                   else:
                       valid_widths = [w for w, _ in final_hmtx_metrics.values() if w > 0]
                       if valid_widths: out_font['OS/2'].xAvgCharWidth = int(sum(valid_widths) / len(valid_widths))
                       
-              # 👈【最重要：エディタの強制2倍マージン展開を解除】
-              # 古い時代の厳密等幅フラグを0にすることで、レンダラーの「全角日本語＝2倍マス強制配置（40%の空白）」を解除します。
-              # PANOSE=9の効果により、エディタ上では等幅フォントとして機能しつつ、3:5のリアル外枠がそのまま画面に出力されます。
+              # エディタの強制1:2展開（右空白の自動挿入回路）を解除し、PANOSE=9と組み合わせてリアルな外枠を有効化
               if 'post' in out_font: out_font['post'].isFixedPitch = 0
               
               if 'hhea' in out_font:
