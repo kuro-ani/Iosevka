@@ -78,14 +78,13 @@ jobs:
               out_upem_scale = out_upem / ja_upem
               iosevka_char_width, _ = out_font['hmtx'].metrics.get('A', (500, 0))
               
-              if is_mono:
-                  # 👈【3:5領域の完全固定】Mono版の外枠は、可変値に影響されない完璧な「5/3倍（1.666倍）」にする
-                  target_ja_width = int(iosevka_char_width * 5 / 3)
-                  # 文字の見た目（輪郭データ）だけを、この5/3倍の枠から user_ratio(0.92) でさらにスマートに引き締める
-                  dynamic_scale_x = out_upem_scale * (target_ja_width / 1000.0) * user_ratio
-              else:
-                  dynamic_scale_x = out_upem_scale * ((iosevka_char_width * 2) / 1000.0) * user_ratio
-                  target_ja_width = int(1000 * dynamic_scale_x)
+              # MONO版・Prop版ともに、文字の基本となる変形マトリクスの基準を「完全な2倍（1:2）」に完全同期
+              calc_width = int(iosevka_char_width * 2)
+              
+              # 👈【Mono版の極小自爆の完全修正】
+              # 5/3倍という無理な縮小を完全にやめ、1:2の枠（calc_width）に対して user_ratio(0.92) をストレートに適用。
+              # これにより、Prop版が長体化に大成功したのと全く同じ原理で、文字データが横幅いっぱいにパツパツに広がります。
+              dynamic_scale_x = out_upem_scale * (calc_width / 1000.0) * user_ratio
                   
               out_glyph_set = out_font.getGlyphSet()
               new_glyph_order = list(out_font.getGlyphOrder())
@@ -96,10 +95,11 @@ jobs:
                   v_w, v_l = ja_hmtx.metrics[j_g_name]
                   orig_glyph = ja_glyf[j_g_name]
                   
-                  calc_width = target_ja_width if is_mono else int(v_w * dynamic_scale_x)
+                  # 日本語グリフ追加時のみ、上記の等幅制御幅（2倍固定）を外枠（hmtx）に適用
+                  glyph_width = calc_width if is_mono else int(v_w * dynamic_scale_x)
                   
                   if orig_glyph.numberOfContours == 0 or not hasattr(orig_glyph, 'xMin'):
-                      final_hmtx_metrics[unique_ja_g_name] = (calc_width, 0)
+                      final_hmtx_metrics[unique_ja_g_name] = (glyph_width, 0)
                       out_glyf[unique_ja_g_name] = orig_glyph
                       for table in out_font['cmap'].tables: table.cmap[code] = unique_ja_g_name
                       continue
@@ -109,8 +109,8 @@ jobs:
                   if orig_content_width <= 0: orig_content_width, orig_x_min = v_w, 0
                   center_x = (orig_x_min + orig_x_max) / 2
                   
-                  # 完璧な5/3倍の固定外枠の真ん中に、92%にスマート化された日本語を左右均等マージン配置
-                  offset_x = (calc_width / 2) - (center_x * dynamic_scale_x)
+                  # 枠の横幅いっぱいに引き締まった美しい日本語長体を、1:2の枠の真ん中に左右均等配置
+                  offset_x = (glyph_width / 2) - (center_x * dynamic_scale_x)
                   target_lsb = int(orig_x_min * dynamic_scale_x + offset_x)
                   
                   rec_pen = DecomposingRecordingPen(ja_glyph_set)
@@ -120,7 +120,7 @@ jobs:
                   rec_pen.replay(trans_pen)
                   out_glyf[unique_ja_g_name] = t_pen.glyph()
                   
-                  final_hmtx_metrics[unique_ja_g_name] = (calc_width, target_lsb)
+                  final_hmtx_metrics[unique_ja_g_name] = (glyph_width, target_lsb)
                   for table in out_font['cmap'].tables: table.cmap[code] = unique_ja_g_name
               
               out_font.setGlyphOrder(new_glyph_order)
@@ -141,28 +141,15 @@ jobs:
                   if hasattr(out_font['OS/2'], 'panose'):
                       out_font['OS/2'].panose.bFamilyType = 2
                       out_font['OS/2'].panose.bSerifStyle = 11
-                      # 最新等幅規格「9: Monospace」を指定して、OSのリストに等幅フォントとして登録
-                      out_font['OS/2'].panose.bProportion = 9 if is_mono else 0
-                  
-                  if is_mono:
-                      out_font['OS/2'].xAvgCharWidth = iosevka_char_width
-                  else:
-                      valid_widths = [w for w, _ in final_hmtx_metrics.values() if w > 0]
-                      if valid_widths: out_font['OS/2'].xAvgCharWidth = int(sum(valid_widths) / len(valid_widths))
-                      
-              # 古い等幅フラグを0にしてエディタの強制2倍展開を解除。3:5のリアル外枠を有効化させます
-              if 'post' in out_font: out_font['post'].isFixedPitch = 0
+                      out_font['OS/2'].panose.bProportion = 3 if is_mono else 0
+                  valid_widths = [w for w, _ in final_hmtx_metrics.values() if w > 0]
+                  if valid_widths: out_font['OS/2'].xAvgCharWidth = int(sum(valid_widths) / len(valid_widths))
+              if 'post' in out_font: out_font['post'].isFixedPitch = 1 if is_mono else 0
+              if is_mono and 'hhea' in out_font: out_font['hhea'].advanceWidthMax = calc_width
               
-              if 'hhea' in out_font:
-                  out_font['hhea'].advanceWidthMax = max(final_hmtx_metrics.values(), key=lambda m: m)
-                  out_font['hhea'].numberOfHMetrics = len(new_glyph_order)
-
               new_hmtx = table__h_m_t_x()
               new_hmtx.metrics = final_hmtx_metrics
               out_font['hmtx'] = new_hmtx
-              
-              if hasattr(out_font['hmtx'], 'compiled'):
-                  del out_font['hmtx'].compiled
               
               out_font.save(machiko_path)
               out_font.close()
