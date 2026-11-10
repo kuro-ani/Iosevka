@@ -138,7 +138,8 @@ jobs:
                   style_str = "Bold" if "Bold" in filename else "Regular"
                   machiko_path = os.path.join("dist_machiko", filename.replace("IosevkaCustom", brand_family))
                   
-                  base_ff = fontforge.open(ttf)
+                  # 👈【NameError完全撃破】 引数を正しい現在のループ内変数名 (ttf_path) に完全修正
+                  base_ff = fontforge.open(ttf_path)
                   ja_ff = fontforge.open(ja_font_path)
                   
                   base_ff.selection.select('A')
