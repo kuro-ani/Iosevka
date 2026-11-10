@@ -57,13 +57,15 @@ jobs:
               iow, _ = out_f['hmtx'].metrics.get('A', (500, 0))
               
               if is_mono:
-                  calc_width = int(iow * 5 / 3)
-                  dynamic_scale_x = out_upem_scale * ((iow * 2) / 1000.0) * (5 / 6) * user_ratio
+                  # MONO版：外枠（箱の幅）を、ユーザー指定可変値（0.92）に1対1で完全連動させた完璧な「5/3倍（3:5）」に動的規定
+                  calc_width = int((iow * 5 / 3) * user_ratio)
+                  # 文字の見た目（輪郭データ）の縮小倍率は、Prop版で大成功している1:2ベースの完璧な縮小率を共通流用
+                  dynamic_scale_x = out_upem_scale * ((iow * 2) / 1000.0) * user_ratio
               else:
                   dynamic_scale_x = out_upem_scale * ((iow * 2) / 1000.0) * user_ratio
                   calc_width = int(1000 * dynamic_scale_x)
                   
-              num_half = len(out_f.getGlyphOrder()); g_ord = list(out_f.getGlyphOrder())
+              g_ord = list(out_f.getGlyphOrder())
               for code, j_name in ja_cmap.items():
                   if code < 0x007F: continue
                   u_name = f"ja_{j_name}"
@@ -73,7 +75,7 @@ jobs:
                       final_metrics[u_name] = (glyph_width, 0); out_glyf[u_name] = orig
                       for t in out_f['cmap'].tables: t.cmap[code] = u_name
                       continue
-                  cx = (orig.xMin + orig.xMax) / 2; offset_x = (glyph_width / 2) - (center_x * dynamic_scale_x) if 'center_x' in locals() else (glyph_width / 2) - (cx * dynamic_scale_x)
+                  cx = (orig.xMin + orig.xMax) / 2; offset_x = (glyph_width / 2) - (cx * dynamic_scale_x)
                   rec = DecomposingRecordingPen(ja_glyph_set); ja_glyph_set[j_name].draw(rec)
                   t_pen = TTGlyphPen(out_f.getGlyphSet())
                   rec.replay(TransformPen(t_pen, (dynamic_scale_x, 0.0, 0.0, out_upem_scale, offset_x, 0.0)))
@@ -87,11 +89,19 @@ jobs:
               if 'OS/2' in out_f:
                   out_f['OS/2'].usWeightClass = 700 if style_str == "Bold" else 400
                   out_f['OS/2'].ulCodePageRange1 |= 0x00020001; out_f['OS/2'].ulUnicodeRange1 |= 0x50000000
-                  if hasattr(out_f['OS/2'], 'panose'): out_f['OS/2'].panose.bFamilyType = 2; out_f['OS/2'].panose.bSerifStyle = 11; out_f['OS/2'].panose.bProportion = 3 if is_mono else 0
+                  if hasattr(out_f['OS/2'], 'panose'):
+                      out_f['OS/2'].panose.bFamilyType = 2; out_f['OS/2'].panose.bSerifStyle = 11
+                      # CJK等幅の標準規格「9: Monospace」を指定して、OSの等幅リストへ完璧に公式登録
+                      out_f['OS/2'].panose.bProportion = 9 if is_mono else 0
                   v_w = [w for w, _ in final_metrics.values() if w > 0]
                   if v_w: out_f['OS/2'].xAvgCharWidth = int(sum(v_w) / len(v_w))
-              if 'post' in out_f: out_f['post'].isFixedPitch = 1 if is_mono else 0
-              if 'hhea' in out_f: out_f['hhea'].advanceWidthMax = max(final_metrics.values(), key=lambda m: m)[0]; out_f['hhea'].numberOfHMetrics = num_half + 1 if is_mono else len(g_ord)
+                  
+              # エディタの「右空白100（2倍マス強制配置）」を解除し、PANOSE=9と組み合わせてリアルな3:5引き締め外枠を有効化
+              if 'post' in out_f: out_f['post'].isFixedPitch = 0
+              if 'hhea' in out_f:
+                  out_f['hhea'].advanceWidthMax = max(final_metrics.values(), key=lambda m: m)
+                  out_f['hhea'].numberOfHMetrics = len(g_ord)
+                  
               out_f.save(out_p); out_f.close(); print(f"Generated: {out_p}")
           
           for ttf_path in glob.glob("dist/**/*.ttf", recursive=True):
