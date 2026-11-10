@@ -79,9 +79,7 @@ jobs:
               iosevka_char_width, _ = out_font['hmtx'].metrics.get('A', (500, 0))
               
               if is_mono:
-                  # MONO版：エディタに1:2の等幅として認識させるため、外枠データは「完全な2倍」にする
                   calc_width = int(iosevka_char_width * 2)
-                  # 実際の文字の輪郭データ（墨）だけを、正確に半角の「5/3倍」のサイズに長体化
                   dynamic_scale_x = out_upem_scale * ((iosevka_char_width * 5 / 3) / 1000.0) * user_ratio
               else:
                   dynamic_scale_x = out_upem_scale * ((iosevka_char_width * 2) / 1000.0) * user_ratio
@@ -117,11 +115,9 @@ jobs:
                   t_pen = TTGlyphPen(out_font.getGlyphSet())
                   
                   if is_mono:
-                      # 👈【エディタ強制左寄せロック完全無効化ハック】
-                      # グリフの原点 (0, 0) に目に見えないダミー点を打つことで、物理的な最左端（xMin）を0に偽装固定。
-                      # これによりエディタの強制左寄せがこのダミー点で消費され、本物の文字は計算通りの位置に浮き上がります！
-                      t_pen.moveTo(0, 0)
-                      t_pen.lineTo(0, 0)
+                      # 👈【構文バグの修正】引数を正しいタプル形式 (0, 0) に修正
+                      t_pen.moveTo((0, 0))
+                      t_pen.lineTo((0, 0))
                       t_pen.endPath()
                   
                   trans_pen = TransformPen(t_pen, (dynamic_scale_x, 0.0, 0.0, out_upem_scale, offset_x, 0.0))
