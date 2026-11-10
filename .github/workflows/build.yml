@@ -79,9 +79,10 @@ jobs:
               iosevka_char_width, _ = out_font['hmtx'].metrics.get('A', (500, 0))
               
               if is_mono:
-                  # MONO版：外枠（フォント領域）の幅を、ユーザー指定の可変値（user_ratio）を反映させた完璧な「5/3倍」に動的決定
-                  target_ja_width = int((iosevka_char_width * 5 / 3) * user_ratio)
-                  dynamic_scale_x = out_upem_scale * (target_ja_width / 1000.0)
+                  # 👈【3:5領域の完全固定】Mono版の外枠は、可変値に影響されない完璧な「5/3倍（1.666倍）」にする
+                  target_ja_width = int(iosevka_char_width * 5 / 3)
+                  # 文字の見た目（輪郭データ）だけを、この5/3倍の枠から user_ratio(0.92) でさらにスマートに引き締める
+                  dynamic_scale_x = out_upem_scale * (target_ja_width / 1000.0) * user_ratio
               else:
                   dynamic_scale_x = out_upem_scale * ((iosevka_char_width * 2) / 1000.0) * user_ratio
                   target_ja_width = int(1000 * dynamic_scale_x)
@@ -95,7 +96,6 @@ jobs:
                   v_w, v_l = ja_hmtx.metrics[j_g_name]
                   orig_glyph = ja_glyf[j_g_name]
                   
-                  # 日本語グリフ追加時のみ、上記の計算幅を適用
                   calc_width = target_ja_width if is_mono else int(v_w * dynamic_scale_x)
                   
                   if orig_glyph.numberOfContours == 0 or not hasattr(orig_glyph, 'xMin'):
@@ -109,7 +109,7 @@ jobs:
                   if orig_content_width <= 0: orig_content_width, orig_x_min = v_w, 0
                   center_x = (orig_x_min + orig_x_max) / 2
                   
-                  # 引き締まった外枠のど真ん中に、日本語の文字形状を左右均等アキで中央配置
+                  # 完璧な5/3倍の固定外枠の真ん中に、92%にスマート化された日本語を左右均等マージン配置
                   offset_x = (calc_width / 2) - (center_x * dynamic_scale_x)
                   target_lsb = int(orig_x_min * dynamic_scale_x + offset_x)
                   
@@ -141,20 +141,16 @@ jobs:
                   if hasattr(out_font['OS/2'], 'panose'):
                       out_font['OS/2'].panose.bFamilyType = 2
                       out_font['OS/2'].panose.bSerifStyle = 11
-                      # 👈【等幅認識の標準規格】
-                      # MONO版は「9: Monospace（等幅）」を明示的に指定。これでシステムに等幅フォントとして公式登録されます。
+                      # 最新等幅規格「9: Monospace」を指定して、OSのリストに等幅フォントとして登録
                       out_font['OS/2'].panose.bProportion = 9 if is_mono else 0
                   
-                  # TOMLのShape 400設計を100%シャープに保つため、平均幅を半角基準で完全固定
                   if is_mono:
                       out_font['OS/2'].xAvgCharWidth = iosevka_char_width
                   else:
                       valid_widths = [w for w, _ in final_hmtx_metrics.values() if w > 0]
                       if valid_widths: out_font['OS/2'].xAvgCharWidth = int(sum(valid_widths) / len(valid_widths))
                       
-              # 👈【最重要：等幅強制丸め込みの完全解除】
-              # 古い時代の厳密等幅フラグを0にすることで、レンダラーの「全角＝2倍マス強制配置」を解除します。
-              # PANOSE=9の効果により、アプリ上では等幅フォントとして登録されつつ、3:5の正確な外枠がそのまま画面に出力されます。
+              # 古い等幅フラグを0にしてエディタの強制2倍展開を解除。3:5のリアル外枠を有効化させます
               if 'post' in out_font: out_font['post'].isFixedPitch = 0
               
               if 'hhea' in out_font:
