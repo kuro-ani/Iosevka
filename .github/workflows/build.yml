@@ -55,7 +55,7 @@ jobs:
                   out_p = os.path.join("dist_machiko", fn.replace("IosevkaProp", b_f))
                   f_f = TTFont(ttf); f_m = {k: v for k, v in f_f['hmtx'].metrics.items()}
                   j_f = TTFont(ja_f); g_ord = list(f_f.getGlyphOrder())
-                  scale_x = (f_f['head'].unitsPerEm / j_f['head'].unitsPerEm) * ((f_f['hmtx'].metrics.get('A', (500, 0))[0] * 2) / 1000.0) * ratio
+                  scale_x = (f_f['head'].unitsPerEm / j_f['head'].unitsPerEm) * ((f_f['hmtx'].metrics.get('A', (500, 0)) * 2) / 1000.0) * ratio
                   
                   for code, j_name in j_f['cmap'].getBestCmap().items():
                       if code < 0x007F: continue
@@ -102,22 +102,30 @@ jobs:
                   for j_g in j_ff.selection.byGlyphs:
                       code = j_g.unicode
                       if code < 0x007F or code == -1: continue
-                      j_g.transform(mat); j_g.width = t_w
-                      bbox = j_g.boundingBox()
-                      if (bbox[2] - bbox[0]) > 0:
-                          j_g.transform(psMat.translate((t_w / 2) - ((bbox[0] + bbox[2]) / 2), 0))
-                          j_g.width = t_w
                       
-                      # 👈【インジェクト処理の完全修正】クリップボードを介した安全なコピー＆ペースト処理
+                      # 👈【フォント化け完全粉砕】先に純粋なZen丸ゴシックの形状データを移植する
                       j_ff.selection.select(code); j_ff.copy()
                       b_ff.createChar(code, f"ja_{j_g.glyphname}")
                       b_ff.selection.select(code); b_ff.paste()
-                      b_ff[code].width = t_w
                       
+                      # 👈 移植したIosevka側の文字に対して変形と中央寄せを実行
+                      b_ff[code].transform(mat)
+                      b_ff[code].width = t_w
+                      bbox = b_ff[code].boundingBox()
+                      if (bbox[2] - bbox[0]) > 0:
+                          b_ff[code].transform(psMat.translate((t_w / 2) - ((bbox[0] + bbox[2]) / 2), 0))
+                          b_ff[code].width = t_w
+                          
                   style = "Bold" if "Bold" in fn else "Regular"
                   b_ff.familyname = b_f; b_ff.fontname = f"{b_f}-{style}"; b_ff.fullname = f"{b_f} {style}"
                   b_ff.generate(out_p, flags=('opentype', 'round'))
                   b_ff.close(); j_ff.close()
+                  
+                  # 👈【等幅登録の強制ロック】FontForgeの自動リセットを上書きし、厳密等幅属性を再書き込み
+                  fix_f = TTFont(out_p)
+                  if 'post' in fix_f: fix_f['post'].isFixedPitch = 1
+                  if 'OS/2' in fix_f and hasattr(fix_f['OS/2'], 'panose'): fix_f['OS/2'].panose.bProportion = 3
+                  fix_f.save(out_p); fix_f.close()
 
       - name: Upload Both Artifacts
         uses: actions/upload-artifact@v4
