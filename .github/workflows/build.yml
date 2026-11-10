@@ -49,7 +49,10 @@ jobs:
           from fontTools.pens.ttGlyphPen import TTGlyphPen
           from fontTools.pens.recordingPen import DecomposingRecordingPen
           from fontTools.ttLib.tables._h_m_t_x import table__h_m_t_x
-          ja_font_path = "ZenMaruGothic-Light.ttf"
+          
+          root_dir = os.getcwd()
+          ja_font_path = os.path.join(root_dir, "ZenMaruGothic-Light.ttf")
+          
           built_files = glob.glob("dist/**/*.ttf", recursive=True)
           os.makedirs("dist_machiko", exist_ok=True)
           MONO_SHRINK_RATIO = float(os.environ.get("MONO_RATIO", 0.92))
@@ -79,9 +82,12 @@ jobs:
               iosevka_char_width, _ = out_font['hmtx'].metrics.get('A', (500, 0))
               
               if is_mono:
-                  calc_width = int(iosevka_char_width * 2)
-                  dynamic_scale_x = out_upem_scale * ((iosevka_char_width * 5 / 3) / 1000.0) * user_ratio
+                  # MONO版：外枠（フォント領域）の箱の幅を完璧な「5/3倍」にガッチリ規定してハードロック代入
+                  calc_width = int(iosevka_char_width * 5 / 3)
+                  # 文字の見た目（輪郭データ）も、この5/3倍の動的枠に1対1で完璧に等倍同期（余計な隙間を生まない）
+                  dynamic_scale_x = out_upem_scale * (calc_width / 1000.0) * user_ratio
               else:
+                  # Prop版：完成している中央寄せロジックを完全保護
                   dynamic_scale_x = out_upem_scale * ((iosevka_char_width * 2) / 1000.0) * user_ratio
                   calc_width = int(1000 * dynamic_scale_x)
                   
@@ -94,6 +100,7 @@ jobs:
                   v_w, v_l = ja_hmtx.metrics[j_g_name]
                   orig_glyph = ja_glyf[j_g_name]
                   
+                  # 日本語グリフ追加時のみ、上記の計算幅（MONO版は5/3倍固定、Prop版は可変幅）を適用
                   glyph_width = calc_width if is_mono else int(v_w * dynamic_scale_x)
                   
                   if orig_glyph.numberOfContours == 0 or not hasattr(orig_glyph, 'xMin'):
@@ -107,19 +114,15 @@ jobs:
                   if orig_content_width <= 0: orig_content_width, orig_x_min = v_w, 0
                   center_x = (orig_x_min + orig_x_max) / 2
                   
+                  # 👈【不自然なアキの分散を完全撤去】
+                  # 前回のダミー点配置バグを完全消去。5/3倍に引き締まった正規の外枠（glyph_width）の真ん中へ、
+                  # 長体化された日本語を綺麗に中央寄せ配置します。
                   offset_x = (glyph_width / 2) - (center_x * dynamic_scale_x)
                   target_lsb = int(orig_x_min * dynamic_scale_x + offset_x)
                   
                   rec_pen = DecomposingRecordingPen(ja_glyph_set)
                   ja_glyph_set[j_g_name].draw(rec_pen)
                   t_pen = TTGlyphPen(out_font.getGlyphSet())
-                  
-                  if is_mono:
-                      # 👈【構文バグの修正】引数を正しいタプル形式 (0, 0) に修正
-                      t_pen.moveTo((0, 0))
-                      t_pen.lineTo((0, 0))
-                      t_pen.endPath()
-                  
                   trans_pen = TransformPen(t_pen, (dynamic_scale_x, 0.0, 0.0, out_upem_scale, offset_x, 0.0))
                   rec_pen.replay(trans_pen)
                   out_glyf[unique_ja_g_name] = t_pen.glyph()
@@ -145,15 +148,30 @@ jobs:
                   if hasattr(out_font['OS/2'], 'panose'):
                       out_font['OS/2'].panose.bFamilyType = 2
                       out_font['OS/2'].panose.bSerifStyle = 11
-                      out_font['OS/2'].panose.bProportion = 3 if is_mono else 0
-                  valid_widths = [w for w, _ in final_hmtx_metrics.values() if w > 0]
-                  if valid_widths: out_font['OS/2'].xAvgCharWidth = int(sum(valid_widths) / len(valid_widths))
-              if 'post' in out_font: out_font['post'].isFixedPitch = 1 if is_mono else 0
-              if is_mono and 'hhea' in out_font: out_font['hhea'].advanceWidthMax = calc_width
+                      # CJK等幅の標準規格「9: Monospace」を指定して、OSのリストに等幅として登録
+                      out_font['OS/2'].panose.bProportion = 9 if is_mono else 0
+                  
+                  if is_mono:
+                      out_font['OS/2'].xAvgCharWidth = iosevka_char_width
+                  else:
+                      valid_widths = [w for w, _ in final_hmtx_metrics.values() if w > 0]
+                      if valid_widths: out_font['OS/2'].xAvgCharWidth = int(sum(valid_widths) / len(valid_widths))
+                      
+              # 👈【最重要：エディタの強制1:2展開を完全解除】
+              # 古い等幅フラグを0にして、エディタの「右空白100（2倍マス強制配置）」を完全に粉砕。
+              # PANOSE=9の効果により、等幅フォントのアイデンティティを保ったまま、3:5のリアルな引き締め外枠を有効化させます。
+              if 'post' in out_font: out_font['post'].isFixedPitch = 0
               
+              if 'hhea' in out_font:
+                  out_font['hhea'].advanceWidthMax = max(final_hmtx_metrics.values(), key=lambda m: m)
+                  out_font['hhea'].numberOfHMetrics = len(new_glyph_order)
+
               new_hmtx = table__h_m_t_x()
               new_hmtx.metrics = final_hmtx_metrics
               out_font['hmtx'] = new_hmtx
+              
+              if hasattr(out_font['hmtx'], 'compiled'):
+                  del out_font['hmtx'].compiled
               
               out_font.save(machiko_path)
               out_font.close()
