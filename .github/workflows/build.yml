@@ -78,13 +78,16 @@ jobs:
               out_upem_scale = out_upem / ja_upem
               iosevka_char_width, _ = out_font['hmtx'].metrics.get('A', (500, 0))
               
+              # 👈【数理設計の完全同調】
+              # 文字の実際の縮小倍率（dynamic_scale_x）は、Prop版で完璧に成功している「1:2ベースの縮小マトリクス」をMONO版にも100%完全共通で適用する。
+              # これにより、文字データが半角サイズ（500幅）にまでペシャンコに自爆縮小するバグが完全に停止します！
+              dynamic_scale_x = out_upem_scale * ((iosevka_char_width * 2) / 1000.0) * user_ratio
+              
               if is_mono:
-                  # MONO版：システムに等幅認識させるため、外枠データは「完全な2倍」にする
+                  # MONO版：システムに1:2の等幅として認識させるため、外枠データは完璧な「半角の2倍」に完全固定
                   calc_width = int(iosevka_char_width * 2)
-                  # 👈【真の数理同期】1000.0を完全消去し、フォント本来の解像度（out_upem）を基準に3:5（5/6倍）にする
-                  dynamic_scale_x = out_upem_scale * (calc_width / float(out_upem)) * (5 / 6) * user_ratio
               else:
-                  dynamic_scale_x = out_upem_scale * ((iosevka_char_width * 2) / 1000.0) * user_ratio
+                  # Prop版：従来どおりの完璧な可変アドバンス幅を維持
                   calc_width = int(1000 * dynamic_scale_x)
                   
               out_glyph_set = out_font.getGlyphSet()
@@ -96,7 +99,7 @@ jobs:
                   v_w, v_l = ja_hmtx.metrics[j_g_name]
                   orig_glyph = ja_glyf[j_g_name]
                   
-                  # 日本語グリフ追加時のみ、上記の等幅制御幅（2倍固定）を外枠として適用
+                  # 日本語グリフ追加時のみ、上記の等幅制御幅を外枠（hmtx）に適用
                   glyph_width = calc_width if is_mono else int(v_w * dynamic_scale_x)
                   
                   if orig_glyph.numberOfContours == 0 or not hasattr(orig_glyph, 'xMin'):
@@ -110,7 +113,7 @@ jobs:
                   if orig_content_width <= 0: orig_content_width, orig_x_min = v_w, 0
                   center_x = (orig_x_min + orig_x_max) / 2
                   
-                  # 正しく3:5長体化された日本語の文字形状を、1:2の外枠の真ん中に左右均等アキで中央配置
+                  # Prop版と同じ美しい縮小率で引き締まった文字形状を、1:2の外枠の真ん中に左右均等配置
                   offset_x = (glyph_width / 2) - (center_x * dynamic_scale_x)
                   target_lsb = int(orig_x_min * dynamic_scale_x + offset_x)
                   
