@@ -81,8 +81,11 @@ jobs:
               out_upem_scale = out_upem / ja_upem
               iosevka_char_width, _ = out_font['hmtx'].metrics.get('A', (500, 0))
               
+              # 【TrueType規格完全同期】元の半角Iosevkaグリフの総数を正確にキープ
+              num_half_glyphs = len(out_font.getGlyphOrder())
+              
               if is_mono:
-                  # MONO版：外枠（フォント領域）のサイズをユーザー指定の可変値（user_ratio）を反映させた完璧な「5/3倍」に動的決定
+                  # MONO版：外枠（フォント領域）の幅を、ユーザー指定の可変値（user_ratio）を反映させた完璧な「5/3倍」に動的決定
                   target_ja_width = int((iosevka_char_width * 5 / 3) * user_ratio)
                   dynamic_scale_x = out_upem_scale * (target_ja_width / 1000.0)
               else:
@@ -90,16 +93,11 @@ jobs:
                   target_ja_width = int(1000 * dynamic_scale_x)
                   
               out_glyph_set = out_font.getGlyphSet()
-              original_glyph_order = list(out_font.getGlyphOrder())
-              
-              # 日本語グリフの一時格納用
-              ja_glyphs_added = []
-              
+              new_glyph_order = list(out_font.getGlyphOrder())
               for code, j_g_name in ja_cmap.items():
                   if code < 0x007F: continue
                   unique_ja_g_name = f"ja_{j_g_name}"
-                  if unique_ja_g_name not in ja_glyphs_added:
-                      ja_glyphs_added.append(unique_ja_g_name)
+                  if unique_ja_g_name not in new_glyph_order: new_glyph_order.append(unique_ja_g_name)
                   v_w, v_l = ja_hmtx.metrics[j_g_name]
                   orig_glyph = ja_glyf[j_g_name]
                   
@@ -116,6 +114,7 @@ jobs:
                   if orig_content_width <= 0: orig_content_width, orig_x_min = v_w, 0
                   center_x = (orig_x_min + orig_x_max) / 2
                   
+                  # 5/3倍の外枠の真ん中に、日本語の文字形状を左右均等アキで中央配置（ダミー点は完全抹殺）
                   offset_x = (calc_width / 2) - (center_x * dynamic_scale_x)
                   target_lsb = int(orig_x_min * dynamic_scale_x + offset_x)
                   
@@ -129,14 +128,8 @@ jobs:
                   final_hmtx_metrics[unique_ja_g_name] = (calc_width, target_lsb)
                   for table in out_font['cmap'].tables: table.cmap[code] = unique_ja_g_name
               
-              if is_mono:
-                  # 👈【3:5インデックス順序完全再編成ハック】
-                  # コンパイラの自動省略の裏をかくため、グリフの並び順を「[すべての全角日本語] ＋ [すべての元の半角]」にする。
-                  # これによりフォント全体の等幅基準が「3:5の全角幅」側に強制偽装ロックされ、個別幅データの消滅を100%防ぎます！
-                  out_font.setGlyphOrder(ja_glyphs_added + original_glyph_order)
-              else:
-                  out_font.setGlyphOrder(original_glyph_order + ja_glyphs_added)
-                  
+              # 👈【文字化け完全防止】元の半角を先頭に残し、日本語は末尾に正しく結合（グリフ順を壊さない）
+              out_font.setGlyphOrder(new_glyph_order)
               ja_font.close()
               full_name = f"{brand_family} {style_str}"
               postscript_name = f"{brand_family}-{style_str}"
@@ -162,10 +155,13 @@ jobs:
               if 'hhea' in out_font:
                   out_font['hhea'].advanceWidthMax = max(final_hmtx_metrics.values(), key=lambda m: m)
                   if is_mono:
-                      # 👈 新しい並び順に完全同期させ、全角日本語の個別の3:5幅データを100%生存させる境界値
-                      out_font['hhea'].numberOfHMetrics = len(ja_glyphs_added) + 1
+                      # 👈【2幅等幅フォント正式規格】
+                      # numberOfHMetrics の値を、半角の総数 ＋ 1 に完全同期。
+                      # これにより、Windowsの破損判定や文字化けを100%絶対に回避しつつ、
+                      # ファイル内部に全角日本語の3:5幅（target_ja_width）を完全無傷で生存保存させます！
+                      out_font['hhea'].numberOfHMetrics = num_half_glyphs + 1
                   else:
-                      out_font['hhea'].numberOfHMetrics = len(out_font.getGlyphOrder())
+                      out_font['hhea'].numberOfHMetrics = len(new_glyph_order)
 
               new_hmtx = table__h_m_t_x()
               new_hmtx.metrics = final_hmtx_metrics
