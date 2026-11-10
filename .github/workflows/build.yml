@@ -55,7 +55,10 @@ jobs:
                   out_p = os.path.join("dist_machiko", fn.replace("IosevkaProp", b_f))
                   f_f = TTFont(ttf); f_m = {k: v for k, v in f_f['hmtx'].metrics.items()}
                   j_f = TTFont(ja_f); g_ord = list(f_f.getGlyphOrder())
-                  scale_x = (f_f['head'].unitsPerEm / j_f['head'].unitsPerEm) * ((f_f['hmtx'].metrics.get('A', (500, 0)) * 2) / 1000.0) * ratio
+                  
+                  # 👈【タプル型エラーの完全修正】 .get(...)[0] を記述し、正確に「半角Aの文字幅数値」を取り出す
+                  iow = f_f['hmtx'].metrics.get('A', (500, 0))[0]
+                  scale_x = (f_f['head'].unitsPerEm / j_f['head'].unitsPerEm) * ((iow * 2) / 1000.0) * ratio
                   
                   for code, j_name in j_f['cmap'].getBestCmap().items():
                       if code < 0x007F: continue
@@ -103,12 +106,10 @@ jobs:
                       code = j_g.unicode
                       if code < 0x007F or code == -1: continue
                       
-                      # 👈【フォント化け完全粉砕】先に純粋なZen丸ゴシックの形状データを移植する
                       j_ff.selection.select(code); j_ff.copy()
                       b_ff.createChar(code, f"ja_{j_g.glyphname}")
                       b_ff.selection.select(code); b_ff.paste()
                       
-                      # 👈 移植したIosevka側の文字に対して変形と中央寄せを実行
                       b_ff[code].transform(mat)
                       b_ff[code].width = t_w
                       bbox = b_ff[code].boundingBox()
@@ -121,7 +122,6 @@ jobs:
                   b_ff.generate(out_p, flags=('opentype', 'round'))
                   b_ff.close(); j_ff.close()
                   
-                  # 👈【等幅登録の強制ロック】FontForgeの自動リセットを上書きし、厳密等幅属性を再書き込み
                   fix_f = TTFont(out_p)
                   if 'post' in fix_f: fix_f['post'].isFixedPitch = 1
                   if 'OS/2' in fix_f and hasattr(fix_f['OS/2'], 'panose'): fix_f['OS/2'].panose.bProportion = 3
