@@ -17,7 +17,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: |
-          sudo apt-get update && sudo apt-get install -y ttfautohint xxd
+          sudo apt-get update && sudo apt-get install -y ttfautohint xxd fontforge python3-fontforge
           pip install fonttools
       - id: cache-iosevka
         uses: actions/cache@v4
@@ -36,78 +36,99 @@ jobs:
           MONO_RATIO: ${{ github.event.inputs.mono_shrink_ratio }}
           PROP_RATIO: ${{ github.event.inputs.prop_scale_x_ratio }}
         run: |
-          import os, glob
+          import os, glob, fontforge, psMat
           from fontTools.ttLib import TTFont
           from fontTools.pens.transformPen import TransformPen
           from fontTools.pens.ttGlyphPen import TTGlyphPen
           from fontTools.pens.recordingPen import DecomposingRecordingPen
           from fontTools.ttLib.tables._h_m_t_x import table__h_m_t_x
           
-          ja_font_path = "ZenMaruGothic-Light.ttf"
+          ja_f = "ZenMaruGothic-Light.ttf"
           os.makedirs("dist_machiko", exist_ok=True)
           m_r, p_r = float(os.environ["MONO_RATIO"]), float(os.environ["PROP_RATIO"])
           
-          def merge_font(ttf_path, brand_family, is_mono, user_ratio):
-              style_str = "Bold" if "Bold" in ttf_path else "Regular"
-              out_p = os.path.join("dist_machiko", os.path.basename(ttf_path).replace("IosevkaCustom" if is_mono else "IosevkaProp", brand_family))
-              out_f = TTFont(ttf_path); out_cmap = out_f['cmap'].getBestCmap(); out_glyf = out_f['glyf']; out_upem = out_f['head'].unitsPerEm
-              final_metrics = {k: v for k, v in out_f['hmtx'].metrics.items()}
-              ja_f = TTFont(ja_font_path); ja_cmap = ja_f['cmap'].getBestCmap(); ja_hmtx = ja_f['hmtx']; ja_glyf = ja_f['glyf']; ja_glyph_set = ja_f.getGlyphSet()
-              out_upem_scale = out_upem / ja_f['head'].unitsPerEm
-              iow, _ = out_f['hmtx'].metrics.get('A', (500, 0))
+          for ttf in glob.glob("dist/**/*.ttf", recursive=True):
+              if "node_modules" in ttf: continue
+              fn = os.path.basename(ttf)
               
-              if is_mono:
-                  # MONO版：外枠（箱の幅）を、ユーザー指定可変値（0.92）に1対1で完全連動させた完璧な「5/3倍（3:5）」に動的規定
-                  calc_width = int((iow * 5 / 3) * user_ratio)
-                  # 文字の見た目（輪郭データ）の縮小倍率は、Prop版で大成功している1:2ベースの完璧な縮小率を共通流用
-                  dynamic_scale_x = out_upem_scale * ((iow * 2) / 1000.0) * user_ratio
-              else:
-                  dynamic_scale_x = out_upem_scale * ((iow * 2) / 1000.0) * user_ratio
-                  calc_width = int(1000 * dynamic_scale_x)
+              if "IosevkaProp" in fn:
+                  b_f, ratio = "MachikoProp", p_r
+                  out_p = os.path.join("dist_machiko", fn.replace("IosevkaProp", b_f))
+                  f_f = TTFont(ttf); f_m = {k: v for k, v in f_f['hmtx'].metrics.items()}
+                  j_f = TTFont(ja_f); g_ord = list(f_f.getGlyphOrder())
+                  iow = f_f['hmtx'].metrics.get('A', (500, 0))[0]
+                  scale_x = (f_f['head'].unitsPerEm / j_f['head'].unitsPerEm) * ((iow * 2) / 1000.0) * ratio
                   
-              g_ord = list(out_f.getGlyphOrder())
-              for code, j_name in ja_cmap.items():
-                  if code < 0x007F: continue
-                  u_name = f"ja_{j_name}"
-                  if u_name not in g_ord: g_ord.append(u_name)
-                  v_w, v_l = ja_hmtx.metrics[j_name]; orig = ja_glyf[j_name]; glyph_width = calc_width if is_mono else int(v_w * dynamic_scale_x)
-                  if orig.numberOfContours == 0 or not hasattr(orig, 'xMin'):
-                      final_metrics[u_name] = (glyph_width, 0); out_glyf[u_name] = orig
-                      for t in out_f['cmap'].tables: t.cmap[code] = u_name
-                      continue
-                  cx = (orig.xMin + orig.xMax) / 2; offset_x = (glyph_width / 2) - (cx * dynamic_scale_x)
-                  rec = DecomposingRecordingPen(ja_glyph_set); ja_glyph_set[j_name].draw(rec)
-                  t_pen = TTGlyphPen(out_f.getGlyphSet())
-                  rec.replay(TransformPen(t_pen, (dynamic_scale_x, 0.0, 0.0, out_upem_scale, offset_x, 0.0)))
-                  out_glyf[u_name] = t_pen.glyph(); final_metrics[u_name] = (glyph_width, int(orig.xMin * dynamic_scale_x + offset_x))
-                  for t in out_f['cmap'].tables: t.cmap[code] = u_name
+                  for code, j_name in j_f['cmap'].getBestCmap().items():
+                      if code < 0x007F: continue
+                      u_name = f"ja_{j_name}"
+                      if u_name not in g_ord: g_ord.append(u_name)
+                      v_w, v_l = j_f['hmtx'].metrics[j_name]; orig = j_f['glyf'][j_name]; c_w = int(v_w * scale_x)
+                      if orig.numberOfContours == 0 or not hasattr(orig, 'xMin'):
+                          f_m[u_name] = (c_w, 0); f_f['glyf'][u_name] = orig
+                          for t in f_f['cmap'].tables: t.cmap[code] = u_name
+                          continue
+                      ox = (c_w / 2) - (((orig.xMin + orig.xMax) / 2) * scale_x)
+                      rec = DecomposingRecordingPen(j_f.getGlyphSet()); j_f.getGlyphSet()[j_name].draw(rec)
+                      t_p = TTGlyphPen(f_f.getGlyphSet())
+                      rec.replay(TransformPen(t_p, (scale_x, 0.0, 0.0, f_f['head'].unitsPerEm / j_f['head'].unitsPerEm, ox, 0.0)))
+                      f_f['glyf'][u_name] = t_p.glyph(); f_m[u_name] = (c_w, int(orig.xMin * scale_x + ox))
+                      for t in f_f['cmap'].tables: t.cmap[code] = u_name
+                      
+                  f_f.setGlyphOrder(g_ord); new_h = table__h_m_t_x(); new_h.metrics = f_m; f_f['hmtx'] = new_h; j_f.close()
+                  style = "Bold" if "Bold" in fn else "Regular"
+                  f_f['name'].names = []
+                  for nid, txt in {1: b_f, 2: style, 3: f"1.000;UKWN;{b_f}-{style}", 4: f"{b_f} {style}", 6: f"{b_f}-{style}"}.items():
+                      f_f['name'].setName(txt, nid, 3, 1, 0x0411); f_f['name'].setName(txt, nid, 3, 1, 0x0409)
+                  if 'OS/2' in f_f:
+                      f_f['OS/2'].usWeightClass = 700 if "Bold" in fn else 400
+                      if hasattr(f_f['OS/2'], 'panose'): f_f['OS/2'].panose.bProportion = 0
+                      v_w = [w for w, _ in f_m.values() if w > 0]
+                      if v_w: f_f['OS/2'].xAvgCharWidth = int(sum(v_w) / len(v_w))
+                  if 'post' in f_f: f_f['post'].isFixedPitch = 0
+                  f_f.save(out_p); f_f.close()
+                  print(f"Prop Generated: {out_p}")
                   
-              out_f.setGlyphOrder(g_ord); new_h = table__h_m_t_x(); new_h.metrics = final_metrics; out_f['hmtx'] = new_h; ja_f.close()
-              full_name = f"{brand_family} {style_str}"; ps_name = f"{brand_family}-{style_str}"; out_f['name'].names = []
-              for nid, txt in {1: brand_family, 2: style_str, 3: f"1.000;UKWN;{ps_name}", 4: full_name, 6: ps_name}.items():
-                  out_f['name'].setName(txt, nid, 3, 1, 0x0411); out_f['name'].setName(txt, nid, 3, 1, 0x0409); out_f['name'].setName(txt, nid, 1, 0, 0)
-              if 'OS/2' in out_f:
-                  out_f['OS/2'].usWeightClass = 700 if style_str == "Bold" else 400
-                  out_f['OS/2'].ulCodePageRange1 |= 0x00020001; out_f['OS/2'].ulUnicodeRange1 |= 0x50000000
-                  if hasattr(out_f['OS/2'], 'panose'):
-                      out_f['OS/2'].panose.bFamilyType = 2; out_f['OS/2'].panose.bSerifStyle = 11
-                      # CJK等幅の標準規格「9: Monospace」を指定して、OSの等幅リストへ完璧に公式登録
-                      out_f['OS/2'].panose.bProportion = 9 if is_mono else 0
-                  v_w = [w for w, _ in final_metrics.values() if w > 0]
-                  if v_w: out_f['OS/2'].xAvgCharWidth = int(sum(v_w) / len(v_w))
+              elif "IosevkaCustom" in fn:
+                  b_f, ratio = "MachikoMono", m_r
+                  out_p = os.path.join("dist_machiko", fn.replace("IosevkaCustom", b_f))
+                  b_ff = fontforge.open(ttf)
                   
-              # エディタの「右空白100（2倍マス強制配置）」を解除し、PANOSE=9と組み合わせてリアルな3:5引き締め外枠を有効化
-              if 'post' in out_f: out_f['post'].isFixedPitch = 0
-              if 'hhea' in out_f:
-                  out_f['hhea'].advanceWidthMax = max(final_metrics.values(), key=lambda m: m)
-                  out_f['hhea'].numberOfHMetrics = len(g_ord)
+                  # 👈【フォント化けの完全粉砕】クリップボードを一切使わず、ファイルを内部でダイレクト結合
+                  b_ff.mergeFonts(ja_f)
                   
-              out_f.save(out_p); out_f.close(); print(f"Generated: {out_p}")
-          
-          for ttf_path in glob.glob("dist/**/*.ttf", recursive=True):
-              if "node_modules" in ttf_path: continue
-              if "IosevkaProp" in ttf_path: merge_font(ttf_path, "MachikoProp", False, p_r)
-              elif "IosevkaCustom" in ttf_path: merge_font(ttf_path, "MachikoMono", True, m_r)
+                  b_ff.selection.select('A')
+                  for g in b_ff.selection.byGlyphs: iow = g.width; break
+                  t_w = int(iow * 5 / 3)
+                  
+                  # 元の美しいZen丸ゴシックのアウトラインを、正確に3:5（Shape 400連動）に引き締める変形マトリクス
+                  sx = (t_w / (iow * 2)) * (5 / 6) * ratio
+                  mat = psMat.scale(sx, float(b_ff.em) / 1000.0)
+                  
+                  # 結合された全角日本語グリフだけを一括で狙い撃ち変形・幅固定・中央寄せ
+                  b_ff.selection.all()
+                  for g in b_ff.selection.byGlyphs:
+                      code = g.unicode
+                      if code < 0x007F or code == -1: continue
+                      
+                      g.transform(mat)
+                      g.width = t_w
+                      bbox = g.boundingBox()
+                      if (bbox[2] - bbox[0]) > 0:
+                          g.transform(psMat.translate((t_w / 2) - ((bbox[0] + bbox[2]) / 2), 0))
+                          g.width = t_w
+                          
+                  style = "Bold" if "Bold" in fn else "Regular"
+                  b_ff.familyname = b_f; b_ff.fontname = f"{b_f}-{style}"; b_ff.fullname = f"{b_f} {style}"
+                  b_ff.generate(out_p, flags=('opentype', 'round'))
+                  b_ff.close()
+                  
+                  # 完成した3:5等幅ファイルを、fontToolsで固定ピッチフォントとして公式に100%強制登録ロック
+                  fix_f = TTFont(out_p)
+                  if 'post' in fix_f: fix_f['post'].isFixedPitch = 1
+                  if 'OS/2' in fix_f and hasattr(fix_f['OS/2'], 'panose'): fix_f['OS/2'].panose.bProportion = 3
+                  fix_f.save(out_p); fix_f.close()
+                  print(f"Mono Generated: {out_p}")
 
       - name: Upload Both Artifacts
         uses: actions/upload-artifact@v4
