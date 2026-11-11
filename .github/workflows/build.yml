@@ -72,7 +72,6 @@ jobs:
                   ja_upem = ja_font['head'].unitsPerEm
                   out_upem_scale = out_upem / ja_upem
                   
-                  # 👈【Prop版：大成功オリジナル構造の完全復元】 数値を安全に切り分けてタプル型エラーを100%粉砕
                   iosevka_char_width, _ = out_font['hmtx'].metrics.get('A', (500, 0))
                   dynamic_scale_x = out_upem_scale * ((iosevka_char_width * 2) / 1000.0) * user_ratio
                   target_ja_width = int(1000 * dynamic_scale_x)
@@ -159,14 +158,15 @@ jobs:
                           g.width = t_w
                           
                   style = "Bold" if "Bold" in filename else "Regular"
-                  b_ff.familyname = b_f; b_ff.fontname = f"{b_f}-{style}"; b_ff.fullname = f"{b_f} {style}"
+                  # 👈【NameErrorの完全修正】 未定義変数 b_f を、定義済みの brand_family へ完全置換
+                  b_ff.familyname = brand_family; b_ff.fontname = f"{brand_family}-{style}"; b_ff.fullname = f"{brand_family} {style}"
                   b_ff.generate(machiko_path, flags=('opentype', 'round'))
                   b_ff.close()
                   
                   fix_f = TTFont(machiko_path); final_mono_metrics = {}
                   for k, v in fix_f['hmtx'].metrics.items():
                       if k.startswith('ja_'):
-                          final_mono_metrics[k] = (t_w, v[1])
+                          final_mono_metrics[k] = (t_w, v)
                       else:
                           final_mono_metrics[k] = v
                   fix_f['hmtx'].metrics = final_mono_metrics
