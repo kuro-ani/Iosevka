@@ -45,19 +45,21 @@ jobs:
           
           ja_f = "ZenMaruGothic-Light.ttf"
           os.makedirs("dist_machiko", exist_ok=True)
-          m_r, p_r = float(os.environ["MONO_RATIO"]), float(os.environ["PROP_RATIO"])
+          m_r = float(os.environ.get("MONO_RATIO", 0.92))
+          p_r = float(os.environ.get("PROP_RATIO", 0.80))
           
           for ttf_path in glob.glob("dist/**/*.ttf", recursive=True):
               if "node_modules" in ttf_path: continue
               filename = os.path.basename(ttf_path)
               
               if "IosevkaProp" in filename:
-                  b_f, ratio = "MachikoProp", p_r
-                  out_p = os.path.join("dist_machiko", filename.replace("IosevkaProp", b_f))
+                  base_key, brand_family, is_mono, user_ratio = "IosevkaProp", "MachikoProp", False, p_r
+                  style_str = "Bold" if "Bold" in filename else "Regular"
+                  machiko_path = os.path.join("dist_machiko", filename.replace(base_key, brand_family))
                   f_f = TTFont(ttf_path); f_m = {k: v for k, v in f_f['hmtx'].metrics.items()}
                   j_f = TTFont(ja_f); g_ord = list(f_f.getGlyphOrder())
                   iow = f_f['hmtx'].metrics.get('A', (500, 0))
-                  scale_x = (f_f['head'].unitsPerEm / j_f['head'].unitsPerEm) * ((iow * 2) / 1000.0) * ratio
+                  scale_x = (f_f['head'].unitsPerEm / j_f['head'].unitsPerEm) * ((iow * 2) / 1000.0) * user_ratio
                   
                   for code, j_name in j_f['cmap'].getBestCmap().items():
                       if code < 0x007F: continue
@@ -78,21 +80,21 @@ jobs:
                   f_f.setGlyphOrder(g_ord); new_h = table__h_m_t_x(); new_h.metrics = f_m; f_f['hmtx'] = new_h; j_f.close()
                   style = "Bold" if "Bold" in filename else "Regular"
                   f_f['name'].names = []
-                  for nid, txt in {1: b_f, 2: style, 3: f"1.000;UKWN;{b_f}-{style}", 4: f"{b_f} {style}", 6: f"{b_f}-{style}"}.items():
+                  for nid, txt in {1: brand_family, 2: style, 3: f"1.000;UKWN;{brand_family}-{style}", 4: f"{brand_family} {style}", 6: f"{brand_family}-{style}"}.items():
                       f_f['name'].setName(txt, nid, 3, 1, 0x0411); f_f['name'].setName(txt, nid, 3, 1, 0x0409)
                   if 'OS/2' in f_f:
-                      f_f['OS/2'].usWeightClass = 700 if style_str == "Bold" else 400
+                      f_f['OS/2'].usWeightClass = 700 if style == "Bold" else 400
                       f_f['OS/2'].ulCodePageRange1 |= 0x00020001; f_f['OS/2'].ulUnicodeRange1 |= 0x50000000
                       if hasattr(f_f['OS/2'], 'panose'): f_f['OS/2'].panose.bFamilyType = 2; f_f['OS/2'].panose.bSerifStyle = 11; f_f['OS/2'].panose.bProportion = 0
                       v_w = [w for w, _ in f_m.values() if w > 0]
                       if v_w: f_f['OS/2'].xAvgCharWidth = int(sum(v_w) / len(v_w))
                   if 'post' in f_f: f_f['post'].isFixedPitch = 0
-                  f_f.save(out_p); f_f.close()
-                  print(f"Prop Generated: {out_p}")
+                  f_f.save(machiko_path); f_f.close()
+                  print(f"Prop Generated: {machiko_path}")
                   continue
                   
               elif "IosevkaCustom" in filename:
-                  base_key, brand_family, is_mono, user_ratio = "IosevkaCustom", "MachikoMono", True, MONO_SHRINK_RATIO
+                  base_key, brand_family, is_mono, user_ratio = "IosevkaCustom", "MachikoMono", True, m_r
                   style_str = "Bold" if "Bold" in filename else "Regular"
                   machiko_path = os.path.join("dist_machiko", filename.replace(base_key, brand_family))
                   b_ff = fontforge.open(ttf_path)
@@ -110,21 +112,19 @@ jobs:
                       if code < 0x007F or code == -1: continue
                       g.transform(mat); g.width = t_w
                       bbox = g.boundingBox()
-                      # 👈【タプル型エラーの完全修正】インデックス[0]と[2]を正確に指定
                       if (bbox[2] - bbox[0]) > 0:
                           g.transform(psMat.translate((t_w / 2) - ((bbox[0] + bbox[2]) / 2), 0))
                           g.width = t_w
                           
                   style = "Bold" if "Bold" in filename else "Regular"
-                  b_ff.familyname = b_f; b_ff.fontname = f"{b_f}-{style}"; b_ff.fullname = f"{b_f} {style}"
+                  b_ff.familyname = brand_family; b_ff.fontname = f"{brand_family}-{style}"; b_ff.fullname = f"{brand_family} {style}"
                   b_ff.generate(machiko_path, flags=('opentype', 'round'))
                   b_ff.close()
                   
-                  # FontForgeによる1:2自動丸め込みをfontToolsで上書き破壊し、3:5の外枠（t_w）を完全に焼き付ける
                   fix_f = TTFont(machiko_path); final_mono_metrics = {}
                   for k, v in fix_f['hmtx'].metrics.items():
                       if k.startswith('ja_'):
-                          final_mono_metrics[k] = (t_w, v[1])
+                          final_mono_metrics[k] = (t_w, v)
                       else:
                           final_mono_metrics[k] = v
                   fix_f['hmtx'].metrics = final_mono_metrics
