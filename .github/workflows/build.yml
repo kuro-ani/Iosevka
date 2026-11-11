@@ -47,14 +47,14 @@ jobs:
           os.makedirs("dist_machiko", exist_ok=True)
           m_r, p_r = float(os.environ["MONO_RATIO"]), float(os.environ["PROP_RATIO"])
           
-          for ttf in glob.glob("dist/**/*.ttf", recursive=True):
-              if "node_modules" in ttf: continue
-              fn = os.path.basename(ttf)
+          for ttf_path in glob.glob("dist/**/*.ttf", recursive=True):
+              if "node_modules" in ttf_path: continue
+              filename = os.path.basename(ttf_path)
               
-              if "IosevkaProp" in fn:
+              if "IosevkaProp" in filename:
                   b_f, ratio = "MachikoProp", p_r
-                  out_p = os.path.join("dist_machiko", fn.replace("IosevkaProp", b_f))
-                  f_f = TTFont(ttf); f_m = {k: v for k, v in f_f['hmtx'].metrics.items()}
+                  out_p = os.path.join("dist_machiko", filename.replace("IosevkaProp", b_f))
+                  f_f = TTFont(ttf_path); f_m = {k: v for k, v in f_f['hmtx'].metrics.items()}
                   j_f = TTFont(ja_f); g_ord = list(f_f.getGlyphOrder())
                   iow = f_f['hmtx'].metrics.get('A', (500, 0))
                   scale_x = (f_f['head'].unitsPerEm / j_f['head'].unitsPerEm) * ((iow * 2) / 1000.0) * ratio
@@ -76,29 +76,32 @@ jobs:
                       for t in f_f['cmap'].tables: t.cmap[code] = u_name
                       
                   f_f.setGlyphOrder(g_ord); new_h = table__h_m_t_x(); new_h.metrics = f_m; f_f['hmtx'] = new_h; j_f.close()
-                  style = "Bold" if "Bold" in fn else "Regular"
+                  style = "Bold" if "Bold" in filename else "Regular"
                   f_f['name'].names = []
                   for nid, txt in {1: b_f, 2: style, 3: f"1.000;UKWN;{b_f}-{style}", 4: f"{b_f} {style}", 6: f"{b_f}-{style}"}.items():
                       f_f['name'].setName(txt, nid, 3, 1, 0x0411); f_f['name'].setName(txt, nid, 3, 1, 0x0409)
                   if 'OS/2' in f_f:
-                      f_f['OS/2'].usWeightClass = 700 if "Bold" in fn else 400
-                      if hasattr(f_f['OS/2'], 'panose'): f_f['OS/2'].panose.bProportion = 0
+                      f_f['OS/2'].usWeightClass = 700 if style_str == "Bold" else 400
+                      f_f['OS/2'].ulCodePageRange1 |= 0x00020001; f_f['OS/2'].ulUnicodeRange1 |= 0x50000000
+                      if hasattr(f_f['OS/2'], 'panose'): f_f['OS/2'].panose.bFamilyType = 2; f_f['OS/2'].panose.bSerifStyle = 11; f_f['OS/2'].panose.bProportion = 0
                       v_w = [w for w, _ in f_m.values() if w > 0]
                       if v_w: f_f['OS/2'].xAvgCharWidth = int(sum(v_w) / len(v_w))
                   if 'post' in f_f: f_f['post'].isFixedPitch = 0
                   f_f.save(out_p); f_f.close()
                   print(f"Prop Generated: {out_p}")
+                  continue
                   
-              elif "IosevkaCustom" in fn:
-                  b_f, ratio = "MachikoMono", m_r
-                  out_p = os.path.join("dist_machiko", fn.replace("IosevkaCustom", b_f))
-                  b_ff = fontforge.open(ttf)
+              elif "IosevkaCustom" in filename:
+                  base_key, brand_family, is_mono, user_ratio = "IosevkaCustom", "MachikoMono", True, MONO_SHRINK_RATIO
+                  style_str = "Bold" if "Bold" in filename else "Regular"
+                  machiko_path = os.path.join("dist_machiko", filename.replace(base_key, brand_family))
+                  b_ff = fontforge.open(ttf_path)
                   b_ff.mergeFonts(ja_f)
                   b_ff.selection.select('A')
                   for g in b_ff.selection.byGlyphs: iow = g.width; break
                   t_w = int(iow * 5 / 3)
                   
-                  sx = (t_w / (iow * 2)) * (5 / 6) * ratio
+                  sx = (t_w / (iow * 2)) * (5 / 6) * user_ratio
                   mat = psMat.scale(sx, float(b_ff.em) / 1000.0)
                   
                   b_ff.selection.all()
@@ -107,23 +110,21 @@ jobs:
                       if code < 0x007F or code == -1: continue
                       g.transform(mat); g.width = t_w
                       bbox = g.boundingBox()
-                      if (bbox - bbox) > 0:
-                          g.transform(psMat.translate((t_w / 2) - ((bbox + bbox) / 2), 0))
+                      # 👈【タプル型エラーの完全修正】インデックス[0]と[2]を正確に指定
+                      if (bbox[2] - bbox[0]) > 0:
+                          g.transform(psMat.translate((t_w / 2) - ((bbox[0] + bbox[2]) / 2), 0))
                           g.width = t_w
                           
-                  style = "Bold" if "Bold" in fn else "Regular"
+                  style = "Bold" if "Bold" in filename else "Regular"
                   b_ff.familyname = b_f; b_ff.fontname = f"{b_f}-{style}"; b_ff.fullname = f"{b_f} {style}"
-                  b_ff.generate(out_p, flags=('opentype', 'round'))
+                  b_ff.generate(machiko_path, flags=('opentype', 'round'))
                   b_ff.close()
                   
-                  # 👈【3:5外枠の最終強制ロック注入】
-                  # FontForgeが1:2へと破壊した個別文字幅（hmtx）を、fontToolsで再度「5/3倍固定幅(t_w)」へ上書きロック！
-                  # これにより、秀丸上での半角1つ分の巨大な空白（1:2の残骸）が外枠の箱ごとバッサリ切り落とされます。
-                  fix_f = TTFont(out_p); final_mono_metrics = {}
+                  # FontForgeによる1:2自動丸め込みをfontToolsで上書き破壊し、3:5の外枠（t_w）を完全に焼き付ける
+                  fix_f = TTFont(machiko_path); final_mono_metrics = {}
                   for k, v in fix_f['hmtx'].metrics.items():
                       if k.startswith('ja_'):
-                          # 完璧な5/3倍の外枠サイズと、中央寄せLSBを確実にファイル構造へ焼き付ける
-                          final_mono_metrics[k] = (t_w, v)
+                          final_mono_metrics[k] = (t_w, v[1])
                       else:
                           final_mono_metrics[k] = v
                   fix_f['hmtx'].metrics = final_mono_metrics
@@ -131,10 +132,9 @@ jobs:
                   if 'OS/2' in fix_f and hasattr(fix_f['OS/2'], 'panose'): fix_f['OS/2'].panose.bProportion = 3
                   if 'hhea' in fix_f:
                       fix_f['hhea'].advanceWidthMax = t_w
-                      # 3:5の個別アドバンス幅データを、保存時にシステムに1文字も切り詰めさせないための全グリフ数指定
                       fix_f['hhea'].numberOfHMetrics = len(fix_f.getGlyphOrder())
-                  fix_f.save(out_p); fix_f.close()
-                  print(f"Mono Generated: {out_p}")
+                  fix_f.save(machiko_path); fix_f.close()
+                  print(f"Mono Generated: {machiko_path}")
 
       - name: Upload Both Artifacts
         uses: actions/upload-artifact@v4
