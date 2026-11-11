@@ -56,7 +56,7 @@ jobs:
                   out_p = os.path.join("dist_machiko", fn.replace("IosevkaProp", b_f))
                   f_f = TTFont(ttf); f_m = {k: v for k, v in f_f['hmtx'].metrics.items()}
                   j_f = TTFont(ja_f); g_ord = list(f_f.getGlyphOrder())
-                  iow = f_f['hmtx'].metrics.get('A', (500, 0))[0]
+                  iow = f_f['hmtx'].metrics.get('A', (500, 0))
                   scale_x = (f_f['head'].unitsPerEm / j_f['head'].unitsPerEm) * ((iow * 2) / 1000.0) * ratio
                   
                   for code, j_name in j_f['cmap'].getBestCmap().items():
@@ -93,29 +93,22 @@ jobs:
                   b_f, ratio = "MachikoMono", m_r
                   out_p = os.path.join("dist_machiko", fn.replace("IosevkaCustom", b_f))
                   b_ff = fontforge.open(ttf)
-                  
-                  # 👈【フォント化けの完全粉砕】クリップボードを一切使わず、ファイルを内部でダイレクト結合
                   b_ff.mergeFonts(ja_f)
-                  
                   b_ff.selection.select('A')
                   for g in b_ff.selection.byGlyphs: iow = g.width; break
                   t_w = int(iow * 5 / 3)
                   
-                  # 元の美しいZen丸ゴシックのアウトラインを、正確に3:5（Shape 400連動）に引き締める変形マトリクス
                   sx = (t_w / (iow * 2)) * (5 / 6) * ratio
                   mat = psMat.scale(sx, float(b_ff.em) / 1000.0)
                   
-                  # 結合された全角日本語グリフだけを一括で狙い撃ち変形・幅固定・中央寄せ
                   b_ff.selection.all()
                   for g in b_ff.selection.byGlyphs:
                       code = g.unicode
                       if code < 0x007F or code == -1: continue
-                      
-                      g.transform(mat)
-                      g.width = t_w
+                      g.transform(mat); g.width = t_w
                       bbox = g.boundingBox()
-                      if (bbox[2] - bbox[0]) > 0:
-                          g.transform(psMat.translate((t_w / 2) - ((bbox[0] + bbox[2]) / 2), 0))
+                      if (bbox - bbox) > 0:
+                          g.transform(psMat.translate((t_w / 2) - ((bbox + bbox) / 2), 0))
                           g.width = t_w
                           
                   style = "Bold" if "Bold" in fn else "Regular"
@@ -123,10 +116,23 @@ jobs:
                   b_ff.generate(out_p, flags=('opentype', 'round'))
                   b_ff.close()
                   
-                  # 完成した3:5等幅ファイルを、fontToolsで固定ピッチフォントとして公式に100%強制登録ロック
-                  fix_f = TTFont(out_p)
+                  # 👈【3:5外枠の最終強制ロック注入】
+                  # FontForgeが1:2へと破壊した個別文字幅（hmtx）を、fontToolsで再度「5/3倍固定幅(t_w)」へ上書きロック！
+                  # これにより、秀丸上での半角1つ分の巨大な空白（1:2の残骸）が外枠の箱ごとバッサリ切り落とされます。
+                  fix_f = TTFont(out_p); final_mono_metrics = {}
+                  for k, v in fix_f['hmtx'].metrics.items():
+                      if k.startswith('ja_'):
+                          # 完璧な5/3倍の外枠サイズと、中央寄せLSBを確実にファイル構造へ焼き付ける
+                          final_mono_metrics[k] = (t_w, v)
+                      else:
+                          final_mono_metrics[k] = v
+                  fix_f['hmtx'].metrics = final_mono_metrics
                   if 'post' in fix_f: fix_f['post'].isFixedPitch = 1
                   if 'OS/2' in fix_f and hasattr(fix_f['OS/2'], 'panose'): fix_f['OS/2'].panose.bProportion = 3
+                  if 'hhea' in fix_f:
+                      fix_f['hhea'].advanceWidthMax = t_w
+                      # 3:5の個別アドバンス幅データを、保存時にシステムに1文字も切り詰めさせないための全グリフ数指定
+                      fix_f['hhea'].numberOfHMetrics = len(fix_f.getGlyphOrder())
                   fix_f.save(out_p); fix_f.close()
                   print(f"Mono Generated: {out_p}")
 
