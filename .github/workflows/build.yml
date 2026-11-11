@@ -43,7 +43,7 @@ jobs:
           from fontTools.pens.recordingPen import DecomposingRecordingPen
           from fontTools.ttLib.tables._h_m_t_x import table__h_m_t_x
           
-          ja_f = "ZenMaruGothic-Light.ttf"
+          ja_font_path = "ZenMaruGothic-Light.ttf"
           os.makedirs("dist_machiko", exist_ok=True)
           m_r = float(os.environ.get("MONO_RATIO", 0.92))
           p_r = float(os.environ.get("PROP_RATIO", 0.80))
@@ -56,40 +56,82 @@ jobs:
                   base_key, brand_family, is_mono, user_ratio = "IosevkaProp", "MachikoProp", False, p_r
                   style_str = "Bold" if "Bold" in filename else "Regular"
                   machiko_path = os.path.join("dist_machiko", filename.replace(base_key, brand_family))
-                  f_f = TTFont(ttf_path); f_m = {k: v for k, v in f_f['hmtx'].metrics.items()}
-                  j_f = TTFont(ja_f); g_ord = list(f_f.getGlyphOrder())
-                  iow = f_f['hmtx'].metrics.get('A', (500, 0))
-                  scale_x = (f_f['head'].unitsPerEm / j_f['head'].unitsPerEm) * ((iow * 2) / 1000.0) * user_ratio
                   
-                  for code, j_name in j_f['cmap'].getBestCmap().items():
+                  out_font = TTFont(ttf_path)
+                  out_cmap = out_font['cmap'].getBestCmap()
+                  out_glyf = out_font['glyf']
+                  out_upem = out_font['head'].unitsPerEm
+                  final_hmtx_metrics = {}
+                  for k, v in out_font['hmtx'].metrics.items(): final_hmtx_metrics[k] = v
+                  
+                  ja_font = TTFont(ja_font_path)
+                  ja_cmap = ja_font['cmap'].getBestCmap()
+                  ja_hmtx = ja_font['hmtx']
+                  ja_glyf = ja_font['glyf']
+                  ja_glyph_set = ja_font.getGlyphSet()
+                  ja_upem = ja_font['head'].unitsPerEm
+                  out_upem_scale = out_upem / ja_upem
+                  
+                  # 👈【Prop版：大成功オリジナル構造の完全復元】 数値を安全に切り分けてタプル型エラーを100%粉砕
+                  iosevka_char_width, _ = out_font['hmtx'].metrics.get('A', (500, 0))
+                  dynamic_scale_x = out_upem_scale * ((iosevka_char_width * 2) / 1000.0) * user_ratio
+                  target_ja_width = int(1000 * dynamic_scale_x)
+                  
+                  new_glyph_order = list(out_font.getGlyphOrder())
+                  for code, j_g_name in ja_cmap.items():
                       if code < 0x007F: continue
-                      u_name = f"ja_{j_name}"
-                      if u_name not in g_ord: g_ord.append(u_name)
-                      v_w, v_l = j_f['hmtx'].metrics[j_name]; orig = j_f['glyf'][j_name]; c_w = int(v_w * scale_x)
-                      if orig.numberOfContours == 0 or not hasattr(orig, 'xMin'):
-                          f_m[u_name] = (c_w, 0); f_f['glyf'][u_name] = orig
-                          for t in f_f['cmap'].tables: t.cmap[code] = u_name
+                      unique_ja_g_name = f"ja_{j_g_name}"
+                      if unique_ja_g_name not in new_glyph_order: new_glyph_order.append(unique_ja_g_name)
+                      v_w, v_l = ja_hmtx.metrics[j_g_name]
+                      orig_glyph = ja_glyf[j_g_name]
+                      calc_width = int(v_w * dynamic_scale_x)
+                      if orig_glyph.numberOfContours == 0 or not hasattr(orig_glyph, 'xMin'):
+                          final_hmtx_metrics[unique_ja_g_name] = (calc_width, 0)
+                          out_glyf[unique_ja_g_name] = orig_glyph
+                          for table in out_font['cmap'].tables: table.cmap[code] = unique_ja_g_name
                           continue
-                      ox = (c_w / 2) - (((orig.xMin + orig.xMax) / 2) * scale_x)
-                      rec = DecomposingRecordingPen(j_f.getGlyphSet()); j_f.getGlyphSet()[j_name].draw(rec)
-                      t_p = TTGlyphPen(f_f.getGlyphSet())
-                      rec.replay(TransformPen(t_p, (scale_x, 0.0, 0.0, f_f['head'].unitsPerEm / j_f['head'].unitsPerEm, ox, 0.0)))
-                      f_f['glyf'][u_name] = t_p.glyph(); f_m[u_name] = (c_w, int(orig.xMin * scale_x + ox))
-                      for t in f_f['cmap'].tables: t.cmap[code] = u_name
+                      orig_x_min, orig_x_max = orig_glyph.xMin, orig_glyph.xMax
+                      orig_content_width = orig_x_max - orig_x_min
+                      if orig_content_width <= 0: orig_content_width, orig_x_min = v_w, 0
+                      center_x = (orig_x_min + orig_x_max) / 2
+                      offset_x = (calc_width / 2) - (center_x * dynamic_scale_x)
+                      target_lsb = int(orig_x_min * dynamic_scale_x + offset_x)
                       
-                  f_f.setGlyphOrder(g_ord); new_h = table__h_m_t_x(); new_h.metrics = f_m; f_f['hmtx'] = new_h; j_f.close()
-                  style = "Bold" if "Bold" in filename else "Regular"
-                  f_f['name'].names = []
-                  for nid, txt in {1: brand_family, 2: style, 3: f"1.000;UKWN;{brand_family}-{style}", 4: f"{brand_family} {style}", 6: f"{brand_family}-{style}"}.items():
-                      f_f['name'].setName(txt, nid, 3, 1, 0x0411); f_f['name'].setName(txt, nid, 3, 1, 0x0409)
-                  if 'OS/2' in f_f:
-                      f_f['OS/2'].usWeightClass = 700 if style == "Bold" else 400
-                      f_f['OS/2'].ulCodePageRange1 |= 0x00020001; f_f['OS/2'].ulUnicodeRange1 |= 0x50000000
-                      if hasattr(f_f['OS/2'], 'panose'): f_f['OS/2'].panose.bFamilyType = 2; f_f['OS/2'].panose.bSerifStyle = 11; f_f['OS/2'].panose.bProportion = 0
-                      v_w = [w for w, _ in f_m.values() if w > 0]
-                      if v_w: f_f['OS/2'].xAvgCharWidth = int(sum(v_w) / len(v_w))
-                  if 'post' in f_f: f_f['post'].isFixedPitch = 0
-                  f_f.save(machiko_path); f_f.close()
+                      rec_pen = DecomposingRecordingPen(ja_glyph_set)
+                      ja_glyph_set[j_g_name].draw(rec_pen)
+                      t_pen = TTGlyphPen(out_font.getGlyphSet())
+                      trans_pen = TransformPen(t_pen, (dynamic_scale_x, 0.0, 0.0, out_upem_scale, offset_x, 0.0))
+                      rec_pen.replay(trans_pen)
+                      out_glyf[unique_ja_g_name] = t_pen.glyph()
+                      final_hmtx_metrics[unique_ja_g_name] = (calc_width, target_lsb)
+                      for table in out_font['cmap'].tables: table.cmap[code] = unique_ja_g_name
+                      
+                  out_font.setGlyphOrder(new_glyph_order)
+                  new_hmtx = table__h_m_t_x()
+                  new_hmtx.metrics = final_hmtx_metrics
+                  out_font['hmtx'] = new_hmtx
+                  ja_font.close()
+                  
+                  full_name = f"{brand_family} {style_str}"
+                  postscript_name = f"{brand_family}-{style_str}"
+                  out_font['name'].names = []
+                  name_data = {1: brand_family, 2: style_str, 3: f"1.000;UKWN;{postscript_name}", 4: full_name, 6: postscript_name}
+                  for nid, text_val in name_data.items():
+                      out_font['name'].setName(text_val, nid, 3, 1, 0x0411)
+                      out_font['name'].setName(text_val, nid, 3, 1, 0x0409)
+                      out_font['name'].setName(text_val, nid, 1, 0, 0)
+                  if 'OS/2' in out_font:
+                      out_font['OS/2'].usWeightClass = 700 if style_str == "Bold" else 400
+                      out_font['OS/2'].ulCodePageRange1 |= 0x00020001
+                      out_font['OS/2'].ulUnicodeRange1 |= 0x50000000
+                      if hasattr(out_font['OS/2'], 'panose'):
+                          out_font['OS/2'].panose.bFamilyType = 2
+                          out_font['OS/2'].panose.bSerifStyle = 11
+                          out_font['OS/2'].panose.bProportion = 0
+                      valid_widths = [w for w, _ in final_hmtx_metrics.values() if w > 0]
+                      if valid_widths: out_font['OS/2'].xAvgCharWidth = int(sum(valid_widths) / len(valid_widths))
+                  if 'post' in out_font: out_font['post'].isFixedPitch = 0
+                  out_font.save(machiko_path); out_font.close()
                   print(f"Prop Generated: {machiko_path}")
                   continue
                   
@@ -98,7 +140,7 @@ jobs:
                   style_str = "Bold" if "Bold" in filename else "Regular"
                   machiko_path = os.path.join("dist_machiko", filename.replace(base_key, brand_family))
                   b_ff = fontforge.open(ttf_path)
-                  b_ff.mergeFonts(ja_f)
+                  b_ff.mergeFonts(ja_font_path)
                   b_ff.selection.select('A')
                   for g in b_ff.selection.byGlyphs: iow = g.width; break
                   t_w = int(iow * 5 / 3)
@@ -117,14 +159,14 @@ jobs:
                           g.width = t_w
                           
                   style = "Bold" if "Bold" in filename else "Regular"
-                  b_ff.familyname = brand_family; b_ff.fontname = f"{brand_family}-{style}"; b_ff.fullname = f"{brand_family} {style}"
+                  b_ff.familyname = b_f; b_ff.fontname = f"{b_f}-{style}"; b_ff.fullname = f"{b_f} {style}"
                   b_ff.generate(machiko_path, flags=('opentype', 'round'))
                   b_ff.close()
                   
                   fix_f = TTFont(machiko_path); final_mono_metrics = {}
                   for k, v in fix_f['hmtx'].metrics.items():
                       if k.startswith('ja_'):
-                          final_mono_metrics[k] = (t_w, v)
+                          final_mono_metrics[k] = (t_w, v[1])
                       else:
                           final_mono_metrics[k] = v
                   fix_f['hmtx'].metrics = final_mono_metrics
