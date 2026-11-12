@@ -56,7 +56,6 @@ jobs:
               c_w = int((iow * 5 / 3) * ratio) if is_m else int(1000 * s_x)
               j_cmap = j['cmap'].getBestCmap()
               
-              # 0x005C(バックスラッシュ)に確実に半角円記号(0x00A5)の形状を割り当てるリスト作成
               target_items = list(j_cmap.items())
               if 0x00A5 in j_cmap:
                   target_items.append((0x005C, j_cmap[0x00A5]))
@@ -67,7 +66,6 @@ jobs:
                   u_n = "ja_yen_005c" if is_yen else f"ja_{j_n}"
                   if u_n not in g_ord: g_ord.append(u_n)
                   v_w, _ = j['hmtx'].metrics[j_n]; orig = j['glyf'][j_n]
-                  # Prop版の半角円記号は、さらにスリムな実測幅(v_w * s_x)に合わせてはみ出しを完全防止
                   glyph_w = (iow if is_m else int(v_w * s_x)) if is_yen else (c_w if is_m else int(v_w * s_x))
                   cur_sx = (s_x * 0.5) if (is_yen and is_m) else s_x
                   if orig.numberOfContours == 0 or not hasattr(orig, 'xMin'):
@@ -78,7 +76,16 @@ jobs:
                   rec = DecomposingRecordingPen(j.getGlyphSet()); j.getGlyphSet()[j_n].draw(rec)
                   t_p = TTGlyphPen(f.getGlyphSet())
                   rec.replay(TransformPen(t_p, (cur_sx, 0.0, 0.0, s_y, ox, 0.0)))
-                  f['glyf'][u_n] = t_p.glyph(); f_m[u_n] = (glyph_w, int(orig.xMin * cur_sx + ox))
+                  g_obj = t_p.glyph()
+                  
+                  # 半角円記号(0x005C)のみ、線の細さを補うため多重重ね打ちで擬似ボールド化（太らせ処理）
+                  if is_yen and g_obj.numberOfContours > 0:
+                      t_p2 = TTGlyphPen(f.getGlyphSet())
+                      for dx, dy in [(-14, 0), (14, 0), (0, -10), (0, 10)]:
+                          rec.replay(TransformPen(t_p2, (cur_sx, 0.0, 0.0, s_y, ox + dx, dy)))
+                      g_obj = t_p2.glyph()
+                      
+                  f['glyf'][u_n] = g_obj; f_m[u_n] = (glyph_w, int(orig.xMin * cur_sx + ox))
                   for t in f['cmap'].tables: t.cmap[code] = u_n
                   
               f.setGlyphOrder(g_ord); new_h = table__h_m_t_x(); new_h.metrics = f_m; f['hmtx'] = new_h; j.close()
@@ -87,11 +94,15 @@ jobs:
                   f['name'].setName(txt, nid, 3, 1, 0x0411); f['name'].setName(txt, nid, 3, 1, 0x0409)
               if 'OS/2' in f:
                   f['OS/2'].usWeightClass = 700 if "Bold" in ttf else 400
+                  f['OS/2'].usWinAscent += 120
+                  f['OS/2'].usWinDescent += 60
                   if hasattr(f['OS/2'], 'panose'): f['OS/2'].panose.bProportion = 0
                   v_w = [w for w, _ in f_m.values() if w > 0]
                   if v_w: f['OS/2'].xAvgCharWidth = int(sum(v_w) / len(v_w))
               if 'post' in f: f['post'].isFixedPitch = 0
               if 'hhea' in f:
+                  f['hhea'].ascent += 120
+                  f['hhea'].descent -= 60
                   f['hhea'].advanceWidthMax = max(w for w, _ in f_m.values())
                   f['hhea'].numberOfHMetrics = len(g_ord)
               f.save(out_p); f.close(); print(f"Done: {out_p}")
