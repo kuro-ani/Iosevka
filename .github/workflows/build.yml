@@ -54,19 +54,31 @@ jobs:
               iow, _ = f['hmtx'].metrics.get('A', (500, 0))
               s_x = s_y * ((iow * 2) / 1000.0) * ratio
               c_w = int((iow * 5 / 3) * ratio) if is_m else int(1000 * s_x)
+              j_cmap = j['cmap'].getBestCmap()
               
-              for code, j_n in j['cmap'].getBestCmap().items():
-                  if code < 0x007F: continue
-                  u_n = f"ja_{j_n}"
+              # 0x005C(バックスラッシュ)に確実に半角円記号(0x00A5)の形状を割り当てるリスト作成
+              target_items = list(j_cmap.items())
+              if 0x00A5 in j_cmap:
+                  target_items.append((0x005C, j_cmap[0x00A5]))
+              
+              for code, j_n in target_items:
+                  if code < 0x007F and code != 0x005C: continue
+                  is_yen = (code == 0x005C)
+                  u_n = "ja_yen_005c" if is_yen else f"ja_{j_n}"
                   if u_n not in g_ord: g_ord.append(u_n)
-                  v_w, _ = j['hmtx'].metrics[j_n]; orig = j['glyf'][j_n]; glyph_w = c_w if is_m else int(v_w * s_x)
+                  v_w, _ = j['hmtx'].metrics[j_n]; orig = j['glyf'][j_n]
+                  # Prop版の半角円記号は、さらにスリムな実測幅(v_w * s_x)に合わせてはみ出しを完全防止
+                  glyph_w = (iow if is_m else int(v_w * s_x)) if is_yen else (c_w if is_m else int(v_w * s_x))
+                  cur_sx = (s_x * 0.5) if (is_yen and is_m) else s_x
                   if orig.numberOfContours == 0 or not hasattr(orig, 'xMin'):
-                      f_m[u_n] = (glyph_w, 0); f['glyf'][u_n] = orig; f['cmap'].tables[0].cmap[code] = u_n; continue
-                  cx = (orig.xMin + orig.xMax) / 2; ox = (glyph_w / 2) - (cx * s_x)
+                      f_m[u_n] = (glyph_w, 0); f['glyf'][u_n] = orig
+                      for t in f['cmap'].tables: t.cmap[code] = u_n
+                      continue
+                  cx = (orig.xMin + orig.xMax) / 2; ox = (glyph_w / 2) - (cx * cur_sx)
                   rec = DecomposingRecordingPen(j.getGlyphSet()); j.getGlyphSet()[j_n].draw(rec)
                   t_p = TTGlyphPen(f.getGlyphSet())
-                  rec.replay(TransformPen(t_p, (s_x, 0.0, 0.0, s_y, ox, 0.0)))
-                  f['glyf'][u_n] = t_p.glyph(); f_m[u_n] = (glyph_w, int(orig.xMin * s_x + ox))
+                  rec.replay(TransformPen(t_p, (cur_sx, 0.0, 0.0, s_y, ox, 0.0)))
+                  f['glyf'][u_n] = t_p.glyph(); f_m[u_n] = (glyph_w, int(orig.xMin * cur_sx + ox))
                   for t in f['cmap'].tables: t.cmap[code] = u_n
                   
               f.setGlyphOrder(g_ord); new_h = table__h_m_t_x(); new_h.metrics = f_m; f['hmtx'] = new_h; j.close()
@@ -79,7 +91,9 @@ jobs:
                   v_w = [w for w, _ in f_m.values() if w > 0]
                   if v_w: f['OS/2'].xAvgCharWidth = int(sum(v_w) / len(v_w))
               if 'post' in f: f['post'].isFixedPitch = 0
-              if 'hhea' in f: f['hhea'].advanceWidthMax = max(f_m.values(), key=lambda m: m); f['hhea'].numberOfHMetrics = len(g_ord)
+              if 'hhea' in f:
+                  f['hhea'].advanceWidthMax = max(w for w, _ in f_m.values())
+                  f['hhea'].numberOfHMetrics = len(g_ord)
               f.save(out_p); f.close(); print(f"Done: {out_p}")
           
           for ttf_path in glob.glob("dist/**/*.ttf", recursive=True):
